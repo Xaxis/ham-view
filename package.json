@@ -1,7 +1,9 @@
 {
-  "name": "dark-doppler",
+  "name": "ham-view",
   "type": "module",
-  "version": "0.0.1",
+  "version": "1.0.0",
+  "description": "A customizable dashboard for ham radio operators to monitor multiple websites in resizable, draggable tiles",
+  "homepage": "https://hamview.com",
   "scripts": {
     "dev": "astro dev",
     "build": "astro build",

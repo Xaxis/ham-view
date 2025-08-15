@@ -35,14 +35,22 @@ export const ProfileModal: React.FC = () => {
     }
   };
 
-  const formatDate = (date: Date) => {
-    return new Intl.DateTimeFormat('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    }).format(date);
+  const formatDate = (date: Date | string) => {
+    try {
+      const dateObj = typeof date === 'string' ? new Date(date) : date;
+      if (isNaN(dateObj.getTime())) {
+        return 'Unknown';
+      }
+      return new Intl.DateTimeFormat('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      }).format(dateObj);
+    } catch (error) {
+      return 'Unknown';
+    }
   };
 
   return (
@@ -50,7 +58,7 @@ export const ProfileModal: React.FC = () => {
       <div className="modal large" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <div className="modal-header-content">
-            <img src="/ham-view/logo.png" alt="Ham View" className="modal-logo" />
+            <img src="/logo.png" alt="Ham View" className="modal-logo" />
             <h2>Manage Profiles</h2>
           </div>
           <button className="modal-close" onClick={handleClose}>×</button>
@@ -76,54 +84,62 @@ export const ProfileModal: React.FC = () => {
                   </div>
                 ) : (
                   <div className="profiles-grid">
-                    {state.profiles.map((profile) => (
-                      <div
-                        key={profile.id}
-                        className={`profile-card ${currentProfile?.id === profile.id ? 'active' : ''}`}
-                      >
-                        <div className="profile-card-header">
-                          <h4>{profile.name}</h4>
-                          <div className="profile-card-actions">
-                            {currentProfile?.id !== profile.id && (
+                    {state.profiles.map((profile) => {
+                      // Safety check for profile data
+                      if (!profile || !profile.id) {
+                        return null;
+                      }
+
+                      return (
+                        <div
+                          key={profile.id}
+                          className={`profile-card ${currentProfile?.id === profile.id ? 'active' : ''}`}
+                        >
+                          <div className="profile-card-header">
+                            <h4>{profile.name || 'Unnamed Profile'}</h4>
+                            <div className="profile-card-actions">
+                              {currentProfile?.id !== profile.id && (
+                                <button
+                                  className="btn btn-sm btn-secondary"
+                                  onClick={() => switchProfile(profile.id)}
+                                >
+                                  Switch
+                                </button>
+                              )}
                               <button
-                                className="btn btn-sm btn-secondary"
-                                onClick={() => switchProfile(profile.id)}
+                                className="btn btn-sm btn-danger"
+                                onClick={() => handleDeleteProfile(profile.id)}
                               >
-                                Switch
+                                Delete
                               </button>
-                            )}
-                            <button
-                              className="btn btn-sm btn-danger"
-                              onClick={() => handleDeleteProfile(profile.id)}
-                            >
-                              Delete
-                            </button>
+                            </div>
                           </div>
-                        </div>
-                        
-                        {profile.description && (
-                          <p className="profile-description">{profile.description}</p>
-                        )}
-                        
-                        <div className="profile-stats">
-                          <span className="stat">
-                            <strong>{profile.tiles.length}</strong> views
-                          </span>
-                          <span className="stat">
-                            Created: {formatDate(profile.createdAt)}
-                          </span>
-                          {profile.updatedAt.getTime() !== profile.createdAt.getTime() && (
+
+                          {profile.description && (
+                            <p className="profile-description">{profile.description}</p>
+                          )}
+
+                          <div className="profile-stats">
                             <span className="stat">
-                              Updated: {formatDate(profile.updatedAt)}
+                              <strong>{profile.tiles?.length || 0}</strong> views
                             </span>
+                            <span className="stat">
+                              Created: {formatDate(profile.createdAt)}
+                            </span>
+                            {profile.updatedAt && profile.createdAt &&
+                             new Date(profile.updatedAt).getTime() !== new Date(profile.createdAt).getTime() && (
+                              <span className="stat">
+                                Updated: {formatDate(profile.updatedAt)}
+                              </span>
+                            )}
+                          </div>
+
+                          {currentProfile?.id === profile.id && (
+                            <div className="current-profile-badge">Current</div>
                           )}
                         </div>
-                        
-                        {currentProfile?.id === profile.id && (
-                          <div className="current-profile-badge">Current</div>
-                        )}
-                      </div>
-                    ))}
+                      );
+                    }).filter(Boolean)}
                   </div>
                 )}
               </div>

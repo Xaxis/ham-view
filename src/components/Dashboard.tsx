@@ -126,7 +126,7 @@ export const Dashboard: React.FC = () => {
         {currentProfile?.tiles.length === 0 && (
           <div className="empty-canvas">
             <div className="empty-canvas-content">
-              <img src="/ham-view/logo.png" alt="Ham View" className="empty-state-logo" />
+              <img src="/logo.png" alt="Ham View" className="empty-state-logo" />
               <p>Start by adding your first view</p>
               <button
                 className="add-first-tile-btn"
@@ -141,7 +141,7 @@ export const Dashboard: React.FC = () => {
         {!currentProfile && (
           <div className="no-profile">
             <div className="no-profile-content">
-              <img src="/ham-view/logo.png" alt="Ham View" className="empty-state-logo" />
+              <img src="/logo.png" alt="Ham View" className="empty-state-logo" />
               <p>Create or select a profile to get started</p>
               <button
                 className="create-first-profile-btn"

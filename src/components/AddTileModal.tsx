@@ -147,7 +147,7 @@ export const AddTileModal: React.FC = () => {
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <div className="modal-header-content">
-            <img src="/ham-view/logo.png" alt="Ham View" className="modal-logo" />
+            <img src="/logo.png" alt="Ham View" className="modal-logo" />
             <h2>Add New View</h2>
           </div>
           <button className="modal-close" onClick={handleClose}>×</button>

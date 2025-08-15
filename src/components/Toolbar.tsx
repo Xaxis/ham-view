@@ -33,7 +33,8 @@ export const Toolbar: React.FC<ToolbarProps> = ({ onAutoGrid }) => {
     <div className="toolbar">
       <div className="toolbar-left">
         <div className="app-title">
-          <img src="/ham-view/logo.png" alt="Ham View" className="app-logo" />
+          <img src="/logo.png" alt="Ham View Logo" className="app-logo" />
+          <h1>Ham View</h1>
         </div>
       </div>
 

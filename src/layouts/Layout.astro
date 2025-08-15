@@ -12,7 +12,7 @@ const { title } = Astro.props;
 		<meta charset="UTF-8" />
 		<meta name="description" content="Ham View - A customizable dashboard for ham radio operators to monitor multiple websites in resizable, draggable tiles." />
 		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-		<link rel="icon" type="image/png" href="/ham-view/favicon.png" />
+		<link rel="icon" type="image/png" href="/favicon.png" />
 		<meta name="generator" content={Astro.generator} />
 		<link rel="preconnect" href="https://fonts.googleapis.com">
 		<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -440,6 +440,18 @@ const { title } = Astro.props;
 	  height: 56px;
 	  width: auto;
 	  object-fit: contain;
+	}
+
+	.app-title h1 {
+	  margin: 0;
+	  font-size: var(--text-3xl);
+	  font-weight: 800;
+	  background: linear-gradient(135deg, var(--primary) 0%, var(--primary-hover) 100%);
+	  -webkit-background-clip: text;
+	  -webkit-text-fill-color: transparent;
+	  background-clip: text;
+	  letter-spacing: -0.02em;
+	  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 	}
 
 
@@ -1355,6 +1367,10 @@ const { title } = Astro.props;
 		width: auto;
 	  }
 
+	  .app-title h1 {
+		font-size: var(--text-2xl);
+	  }
+
 	  .toolbar-center {
 		display: none;
 	  }
@@ -1462,6 +1478,10 @@ const { title } = Astro.props;
 	  .empty-state-logo {
 		height: 80px;
 		width: auto;
+	  }
+
+	  .app-title h1 {
+		font-size: var(--text-xl);
 	  }
 	}
 

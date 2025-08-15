@@ -6,8 +6,8 @@ import react from '@astrojs/react';
 export default defineConfig({
   integrations: [react()],
   output: 'static',
-  site: 'https://wilneeley.github.io',
-  base: '/ham-view',
+  site: 'https://hamview.com',
+  base: '/',
   build: {
     assets: 'assets'
   }
