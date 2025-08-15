@@ -1,0 +1,8 @@
+---
+import Layout from '../layouts/Layout.astro';
+import HamViewApp from '../components/HamViewApp.tsx';
+---
+
+<Layout title="Ham View - Multi-Site Dashboard">
+	<HamViewApp client:only="react" />
+</Layout>
