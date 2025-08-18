@@ -49,6 +49,11 @@ export interface TileConfig {
   title: string;
   position?: Position;
   size?: Size;
+  originalUrl?: string;
+  isProxied?: boolean;
+  proxyType?: 'standard' | 'archive' | 'mobile';
+  tileType?: 'iframe' | 'link';
+  description?: string;
 }
 
 export interface ProfileConfig {

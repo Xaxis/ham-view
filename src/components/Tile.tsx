@@ -1,6 +1,7 @@
 import React, { useState, useRef, useCallback } from 'react';
 import { Rnd } from 'react-rnd';
 import type { TileState, Position, Size } from '../types';
+import { WebViewTile } from './WebViewTile';
 
 interface TileProps {
   tile: TileState;
@@ -125,8 +126,35 @@ export const Tile: React.FC<TileProps> = ({
   }, [tile.url]);
 
   const handleOpenInNewTab = useCallback(() => {
-    window.open(tile.url, '_blank', 'noopener,noreferrer');
-  }, [tile.url]);
+    // Use original URL if available, otherwise use the current URL
+    const urlToOpen = tile.originalUrl || tile.url;
+    window.open(urlToOpen, '_blank', 'noopener,noreferrer');
+  }, [tile.url, tile.originalUrl]);
+
+  const handleTryProxy = useCallback(() => {
+    const originalUrl = tile.originalUrl || tile.url;
+    const hostname = new URL(originalUrl).hostname.toLowerCase();
+
+    let proxyUrl: string;
+
+    // Try different proxy strategies
+    if (hostname.includes('dxview.org')) {
+      // For DX View, try the mobile version first
+      proxyUrl = originalUrl.replace('hf.dxview.org', 'm.dxview.org');
+    } else if (hostname.includes('pskreporter.info')) {
+      proxyUrl = `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(originalUrl)}`;
+    } else {
+      // Try a different proxy service
+      proxyUrl = `https://corsproxy.io/?${encodeURIComponent(originalUrl)}`;
+    }
+
+    setIsLoading(true);
+    setHasError(false);
+
+    if (iframeRef.current) {
+      iframeRef.current.src = proxyUrl;
+    }
+  }, [tile.url, tile.originalUrl]);
 
   // Calculate actual size and position based on state
   const actualSize = tile.isMaximized 
@@ -156,10 +184,31 @@ export const Tile: React.FC<TileProps> = ({
       <div className="tile-container">
         {/* Tile Header */}
         <div className="tile-header">
-          <div className="tile-title" title={tile.url}>
-            {tile.title || new URL(tile.url).hostname}
+          <div className="tile-title" title={tile.originalUrl || tile.url}>
+            {tile.title || new URL(tile.originalUrl || tile.url).hostname}
+            {tile.isProxied && <span className="proxy-badge">PROXY</span>}
           </div>
           <div className="tile-controls">
+            <button
+              className="tile-control-btn fullscreen"
+              onClick={() => {
+                const url = tile.originalUrl || tile.url;
+                const width = Math.min(1400, window.screen.width * 0.9);
+                const height = Math.min(900, window.screen.height * 0.9);
+                const left = (window.screen.width - width) / 2;
+                const top = (window.screen.height - height) / 2;
+                window.open(
+                  url,
+                  'hamview_fullscreen',
+                  `width=${width},height=${height},left=${left},top=${top},scrollbars=yes,resizable=yes,toolbar=no,menubar=no,location=no,status=no`
+                );
+              }}
+              title="Open in full screen popup"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+              </svg>
+            </button>
             <button
               className="tile-control-btn open-external"
               onClick={handleOpenInNewTab}
@@ -223,52 +272,16 @@ export const Tile: React.FC<TileProps> = ({
         {/* Tile Content */}
         {!tile.isMinimized && (
           <div className="tile-content">
-            {isLoading && (
-              <div className="tile-loading">
-                <div className="loading-spinner"></div>
-                <p>Loading {new URL(tile.url).hostname}...</p>
-              </div>
-            )}
-            
-            {hasError && (
-              <div className="tile-error">
-                <div className="error-icon">⚠️</div>
-                <p>Failed to load content</p>
-                <p className="error-message">This site may not allow embedding in frames</p>
-                <p className="error-url">{tile.url}</p>
-                <div className="error-actions">
-                  <button
-                    className="retry-btn"
-                    onClick={() => {
-                      setIsLoading(true);
-                      setHasError(false);
-                      if (iframeRef.current) {
-                        iframeRef.current.src = tile.url;
-                      }
-                    }}
-                  >
-                    Retry
-                  </button>
-                  <button
-                    className="open-external-btn"
-                    onClick={handleOpenInNewTab}
-                  >
-                    Open in New Tab
-                  </button>
-                </div>
-              </div>
-            )}
-
-            <iframe
-              ref={iframeRef}
-              src={tile.url}
-              className="tile-iframe"
-              onLoad={handleIframeLoad}
-              onError={handleIframeError}
-              sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation"
-              referrerPolicy="strict-origin-when-cross-origin"
-              style={{
-                display: (isLoading || hasError) ? 'none' : 'block'
+            <WebViewTile
+              url={tile.originalUrl || tile.url}
+              title={tile.title}
+              onLoad={() => {
+                setIsLoading(false);
+                setHasError(false);
+              }}
+              onError={() => {
+                setIsLoading(false);
+                setHasError(true);
               }}
             />
           </div>

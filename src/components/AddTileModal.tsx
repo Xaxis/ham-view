@@ -7,6 +7,9 @@ export const AddTileModal: React.FC = () => {
   const [url, setUrl] = useState('');
   const [title, setTitle] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [useProxy] = useState(false);
+  const [proxyType] = useState<'standard'>('standard');
+  const [tileType] = useState<'iframe'>('iframe');
 
   const handleClose = () => {
     dispatch({ type: 'TOGGLE_ADD_TILE_MODAL', isOpen: false });
@@ -65,7 +68,7 @@ export const AddTileModal: React.FC = () => {
   // Comprehensive list of ham radio and space weather sites
   const siteCategories = {
     'DX & Propagation': [
-      { url: 'https://dxview.org', title: 'DX View' },
+      { url: 'https://hf.dxview.org', title: 'HF DX View' },
       { url: 'https://pskreporter.info/pskmap.html', title: 'PSK Reporter' },
       { url: 'https://voacap.com/hf', title: 'VOACAP' },
       { url: 'https://www.dxsummit.fi', title: 'DX Summit' },
@@ -78,7 +81,6 @@ export const AddTileModal: React.FC = () => {
       { url: 'https://www.spaceweather.gov', title: 'NOAA Space Weather' },
       { url: 'https://spaceweather.com', title: 'SpaceWeather.com' },
       { url: 'https://www.solarham.net', title: 'SolarHam' },
-      { url: 'https://www.n3kl.org/sun/noaa.html', title: 'N3KL Solar Data' },
       { url: 'https://www.swpc.noaa.gov/products/solar-cycle-progression', title: 'Solar Cycle' },
       { url: 'https://services.swpc.noaa.gov/images/animations/suvi/primary/map/', title: 'Solar Images' },
     ],
@@ -137,6 +139,30 @@ export const AddTileModal: React.FC = () => {
     ]
   };
 
+  // Sites known to have iframe restrictions
+  const problematicSites = [
+    'dxview.org',
+    'pskreporter.info',
+    'qrz.com',
+    'eqsl.cc',
+    'lotw.arrl.org',
+    'clublog.org',
+    'contestcalendar.com',
+    'arrl.org',
+    'cqww.com',
+    'spaceweather.gov',
+    'spaceweather.com'
+  ];
+
+  // Sites that work better as direct links (too complex for iframes)
+  const directLinkSites = [
+    'dxview.org',
+    'pskreporter.info',
+    'qrz.com',
+    'lotw.arrl.org',
+    'clublog.org'
+  ];
+
   const handleQuickAdd = (site: { url: string; title: string }) => {
     setUrl(site.url);
     setTitle(site.title);
@@ -179,10 +205,36 @@ export const AddTileModal: React.FC = () => {
               />
             </div>
 
+
+
+
+
             <div className="iframe-info">
               <div className="info-icon">ℹ️</div>
               <div className="info-content">
-                <p><strong>Note:</strong> Some websites may not display properly in tiles due to security restrictions. Links within sites may open in new tabs instead of staying within the tile view.</p>
+                <p><strong>Iframe Compatibility:</strong></p>
+                <div className="compatibility-grid">
+                  <div className="compat-section">
+                    <h4>✅ Works Well in Dashboard</h4>
+                    <ul>
+                      <li>VOACAP (propagation predictions)</li>
+                      <li>Solar-Terrestrial Data</li>
+                      <li>APRS.fi (tracking)</li>
+                      <li>Contest calendars</li>
+                      <li>Most weather sites</li>
+                    </ul>
+                  </div>
+                  <div className="compat-section">
+                    <h4>🚫 Requires Full Screen</h4>
+                    <ul>
+                      <li>DX View (blocks iframes)</li>
+                      <li>PSK Reporter (complex JS)</li>
+                      <li>QRZ.com (login required)</li>
+                      <li>Most social sites</li>
+                    </ul>
+                  </div>
+                </div>
+                <p><em><strong>Tip:</strong> Sites that block iframes will show "Full Screen" and "New Tab" options automatically.</em></p>
               </div>
             </div>
 
