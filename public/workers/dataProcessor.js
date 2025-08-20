@@ -138,72 +138,72 @@ function analyzeBandConditions(spots) {
   return conditions.sort((a, b) => bandOrder.indexOf(a.band) - bandOrder.indexOf(b.band));
 }
 
-// Generate map markers
+// Generate map markers (PSK Reporter methodology with clustering)
 function generateMapMarkers(spots) {
-  const markerData = new Map();
+  // PSK Reporter shows RECEIVER locations as primary spots
+  // Group by precise coordinates (subsquare level) to handle clustering
+  const receiverData = new Map();
 
   spots.forEach(spot => {
-    // Process transmitter
-    const txKey = `${spot.transmitter.location.latitude},${spot.transmitter.location.longitude}`;
-    if (!markerData.has(txKey)) {
-      markerData.set(txKey, {
-        position: spot.transmitter.location,
-        callsigns: new Set(),
-        spots: [],
-        lastActivity: new Date(spot.timestamp),
-      });
-    }
-    const txData = markerData.get(txKey);
-    txData.callsigns.add(spot.transmitter.callsign);
-    txData.spots.push(spot);
-    const spotTime = new Date(spot.timestamp);
-    if (spotTime > txData.lastActivity) {
-      txData.lastActivity = spotTime;
-    }
+    // Only process receiver locations with valid coordinates (not 0,0)
+    if (spot.receiver.location.latitude !== 0 || spot.receiver.location.longitude !== 0) {
+      // Use higher precision for clustering (6 decimal places for subsquare accuracy)
+      const rxKey = `${spot.receiver.location.latitude.toFixed(6)}_${spot.receiver.location.longitude.toFixed(6)}`;
 
-    // Process receiver
-    const rxKey = `${spot.receiver.location.latitude},${spot.receiver.location.longitude}`;
-    if (!markerData.has(rxKey)) {
-      markerData.set(rxKey, {
-        position: spot.receiver.location,
-        callsigns: new Set(),
-        spots: [],
-        lastActivity: new Date(spot.timestamp),
-      });
-    }
-    const rxData = markerData.get(rxKey);
-    rxData.callsigns.add(spot.receiver.callsign);
-    rxData.spots.push(spot);
-    if (spotTime > rxData.lastActivity) {
-      rxData.lastActivity = spotTime;
+      if (!receiverData.has(rxKey)) {
+        receiverData.set(rxKey, {
+          position: spot.receiver.location,
+          callsigns: new Set(),
+          spots: [],
+          lastActivity: new Date(spot.timestamp),
+          bestSNR: spot.snr || -999,
+          worstSNR: spot.snr || -999,
+          bands: new Set(),
+          modes: new Set(),
+          locators: new Set()
+        });
+      }
+
+      const data = receiverData.get(rxKey);
+      data.callsigns.add(spot.receiver.callsign);
+      data.spots.push(spot);
+      const spotTime = new Date(spot.timestamp);
+      if (spotTime > data.lastActivity) {
+        data.lastActivity = spotTime;
+      }
+      if (spot.snr && spot.snr > data.bestSNR) {
+        data.bestSNR = spot.snr;
+      }
+      if (spot.snr && spot.snr < data.worstSNR) {
+        data.worstSNR = spot.snr;
+      }
+      data.bands.add(spot.band);
+      data.modes.add(spot.mode);
+      data.locators.add(spot.receiver.location.maidenhead || '');
     }
   });
 
+  // Convert to markers - PSK Reporter style with clustering
   const markers = [];
   let markerId = 0;
 
-  markerData.forEach((data, key) => {
+  receiverData.forEach((data, key) => {
     const callsignArray = Array.from(data.callsigns);
+    const bandsArray = Array.from(data.bands);
+    const locatorsArray = Array.from(data.locators);
     const primaryCallsign = callsignArray[0];
-    
-    // Determine marker type based on activity
-    const transmittedSpots = data.spots.filter(s => s.transmitter.callsign === primaryCallsign);
-    const receivedSpots = data.spots.filter(s => s.receiver.callsign === primaryCallsign);
-    
-    let type = 'both';
-    if (transmittedSpots.length > 0 && receivedSpots.length === 0) type = 'transmitter';
-    else if (receivedSpots.length > 0 && transmittedSpots.length === 0) type = 'receiver';
+    const isMultiStation = callsignArray.length > 1;
 
     markers.push({
-      id: `marker-${markerId++}`,
+      id: `receiver-${markerId++}`,
       position: data.position,
-      type,
-      callsign: primaryCallsign,
+      type: 'receiver', // All spots are receivers in PSK Reporter methodology
+      callsign: isMultiStation ? `${primaryCallsign} +${callsignArray.length - 1}` : primaryCallsign,
       spotCount: data.spots.length,
       lastActivity: data.lastActivity,
       popup: {
-        title: callsignArray.join(', '),
-        content: `${data.spots.length} spots, last activity: ${data.lastActivity.toLocaleTimeString()}`,
+        title: isMultiStation ? `Multiple Stations (${callsignArray.length})` : `${primaryCallsign} (Monitor)`,
+        content: `${callsignArray.join(', ')} | ${data.spots.length} spots | Best: ${data.bestSNR}dB | Loc: ${locatorsArray.join(', ')}`,
       },
     });
   });

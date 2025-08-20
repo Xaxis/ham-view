@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback, useRef, useEffect, memo } from 'react';
 import type { FilterSettings, Band, Mode } from '../types';
+import CallsignInput from './CallsignInput';
 
 interface AdvancedFilterSidebarProps {
   filters: FilterSettings;
@@ -25,15 +26,17 @@ const qualityThresholds = [
   { value: 'excellent', label: 'Excellent (0dB+)', color: '#10b981' },
 ];
 
-export default function AdvancedFilterSidebar({ 
-  filters, 
-  onFiltersChange, 
-  spotCount, 
-  bandCount 
+function AdvancedFilterSidebar({
+  filters,
+  onFiltersChange,
+  spotCount,
+  bandCount
 }: AdvancedFilterSidebarProps) {
   const [expandedSections, setExpandedSections] = useState<Set<string>>(
     new Set(['time', 'bands', 'modes'])
   );
+
+
 
   const toggleSection = (section: string) => {
     const newExpanded = new Set(expandedSections);
@@ -44,6 +47,14 @@ export default function AdvancedFilterSidebar({
     }
     setExpandedSections(newExpanded);
   };
+
+  // Handle callsign search change
+  const handleCallsignChange = useCallback((searchTerm: string) => {
+    onFiltersChange({
+      ...filters,
+      callsign: { ...filters.callsign, search: searchTerm }
+    });
+  }, [filters, onFiltersChange]);
 
   const handleTimePresetChange = (preset: string) => {
     const now = new Date();
@@ -64,6 +75,7 @@ export default function AdvancedFilterSidebar({
     }
 
     onFiltersChange({
+      ...filters,
       timeRange: {
         ...filters.timeRange,
         start,
@@ -77,14 +89,14 @@ export default function AdvancedFilterSidebar({
     const newBands = filters.bands.includes(band)
       ? filters.bands.filter(b => b !== band)
       : [...filters.bands, band];
-    onFiltersChange({ bands: newBands });
+    onFiltersChange({ ...filters, bands: newBands });
   };
 
   const handleModeToggle = (mode: Mode) => {
     const newModes = filters.modes.includes(mode)
       ? filters.modes.filter(m => m !== mode)
       : [...filters.modes, mode];
-    onFiltersChange({ modes: newModes });
+    onFiltersChange({ ...filters, modes: newModes });
   };
 
   const clearAllFilters = () => {
@@ -167,21 +179,26 @@ export default function AdvancedFilterSidebar({
       {/* Callsign Search */}
       <FilterSection id="callsign" title="Callsign Search" icon="📻">
         <div className="callsign-search">
-          <input
-            type="text"
-            placeholder="Search callsign..."
+          <CallsignInput
             value={filters.callsign.search}
-            onChange={(e) => onFiltersChange({
-              callsign: { ...filters.callsign, search: e.target.value }
-            })}
-            className="callsign-input"
+            onChange={handleCallsignChange}
           />
+
+          {filters.callsign.search && (
+            <div className="active-search">
+              <span className="search-indicator">
+                🔍 Searching for: <strong>{filters.callsign.search}</strong>
+              </span>
+            </div>
+          )}
+
           <div className="callsign-options">
             <label className="checkbox-option">
               <input
                 type="checkbox"
                 checked={filters.callsign.transmitterOnly}
                 onChange={(e) => onFiltersChange({
+                  ...filters,
                   callsign: { ...filters.callsign, transmitterOnly: e.target.checked }
                 })}
               />
@@ -192,6 +209,7 @@ export default function AdvancedFilterSidebar({
                 type="checkbox"
                 checked={filters.callsign.receiverOnly}
                 onChange={(e) => onFiltersChange({
+                  ...filters,
                   callsign: { ...filters.callsign, receiverOnly: e.target.checked }
                 })}
               />
@@ -202,11 +220,18 @@ export default function AdvancedFilterSidebar({
                 type="checkbox"
                 checked={filters.callsign.exactMatch}
                 onChange={(e) => onFiltersChange({
+                  ...filters,
                   callsign: { ...filters.callsign, exactMatch: e.target.checked }
                 })}
               />
               <span>Exact match</span>
             </label>
+          </div>
+
+          <div className="callsign-help">
+            <span className="help-text">
+              💡 Press Enter or click 🔍 to search. Results update automatically after typing.
+            </span>
           </div>
         </div>
       </FilterSection>
@@ -230,6 +255,7 @@ export default function AdvancedFilterSidebar({
               type="datetime-local"
               value={filters.timeRange.start.toISOString().slice(0, 16)}
               onChange={(e) => onFiltersChange({
+                ...filters,
                 timeRange: {
                   ...filters.timeRange,
                   start: new Date(e.target.value),
@@ -240,6 +266,7 @@ export default function AdvancedFilterSidebar({
               type="datetime-local"
               value={filters.timeRange.end.toISOString().slice(0, 16)}
               onChange={(e) => onFiltersChange({
+                ...filters,
                 timeRange: {
                   ...filters.timeRange,
                   end: new Date(e.target.value),
@@ -266,13 +293,13 @@ export default function AdvancedFilterSidebar({
         <div className="selection-controls">
           <button
             className="select-all-btn"
-            onClick={() => onFiltersChange({ bands: allBands })}
+            onClick={() => onFiltersChange({ ...filters, bands: allBands })}
           >
             Select All
           </button>
           <button
             className="select-none-btn"
-            onClick={() => onFiltersChange({ bands: [] })}
+            onClick={() => onFiltersChange({ ...filters, bands: [] })}
           >
             Clear
           </button>
@@ -295,13 +322,13 @@ export default function AdvancedFilterSidebar({
         <div className="selection-controls">
           <button
             className="select-all-btn"
-            onClick={() => onFiltersChange({ modes: allModes })}
+            onClick={() => onFiltersChange({ ...filters, modes: allModes })}
           >
             Select All
           </button>
           <button
             className="select-none-btn"
-            onClick={() => onFiltersChange({ modes: [] })}
+            onClick={() => onFiltersChange({ ...filters, modes: [] })}
           >
             Clear
           </button>
@@ -316,6 +343,7 @@ export default function AdvancedFilterSidebar({
               key={threshold.value}
               className={`quality-btn ${filters.signal.qualityThreshold === threshold.value ? 'active' : ''}`}
               onClick={() => onFiltersChange({
+                ...filters,
                 signal: { ...filters.signal, qualityThreshold: threshold.value as any }
               })}
               style={{ 
@@ -335,9 +363,10 @@ export default function AdvancedFilterSidebar({
               placeholder="Min"
               value={filters.signal.minSnr || ''}
               onChange={(e) => onFiltersChange({
-                signal: { 
-                  ...filters.signal, 
-                  minSnr: e.target.value ? parseFloat(e.target.value) : undefined 
+                ...filters,
+                signal: {
+                  ...filters.signal,
+                  minSnr: e.target.value ? parseFloat(e.target.value) : undefined
                 }
               })}
             />
@@ -347,9 +376,10 @@ export default function AdvancedFilterSidebar({
               placeholder="Max"
               value={filters.signal.maxSnr || ''}
               onChange={(e) => onFiltersChange({
-                signal: { 
-                  ...filters.signal, 
-                  maxSnr: e.target.value ? parseFloat(e.target.value) : undefined 
+                ...filters,
+                signal: {
+                  ...filters.signal,
+                  maxSnr: e.target.value ? parseFloat(e.target.value) : undefined
                 }
               })}
             />
@@ -365,6 +395,7 @@ export default function AdvancedFilterSidebar({
               type="checkbox"
               checked={filters.advanced.uniqueOnly}
               onChange={(e) => onFiltersChange({
+                ...filters,
                 advanced: { ...filters.advanced, uniqueOnly: e.target.checked }
               })}
             />
@@ -375,6 +406,7 @@ export default function AdvancedFilterSidebar({
               type="checkbox"
               checked={filters.advanced.bidirectionalOnly}
               onChange={(e) => onFiltersChange({
+                ...filters,
                 advanced: { ...filters.advanced, bidirectionalOnly: e.target.checked }
               })}
             />
@@ -387,9 +419,10 @@ export default function AdvancedFilterSidebar({
               min="1"
               value={filters.advanced.minSpotCount}
               onChange={(e) => onFiltersChange({
-                advanced: { 
-                  ...filters.advanced, 
-                  minSpotCount: parseInt(e.target.value) || 1 
+                ...filters,
+                advanced: {
+                  ...filters.advanced,
+                  minSpotCount: parseInt(e.target.value) || 1
                 }
               })}
             />
@@ -399,3 +432,13 @@ export default function AdvancedFilterSidebar({
     </div>
   );
 }
+
+// Memoize the component to prevent unnecessary re-renders
+export default memo(AdvancedFilterSidebar, (prevProps, nextProps) => {
+  // Only re-render if filters, spotCount, or bandCount actually change
+  return (
+    JSON.stringify(prevProps.filters) === JSON.stringify(nextProps.filters) &&
+    prevProps.spotCount === nextProps.spotCount &&
+    prevProps.bandCount === nextProps.bandCount
+  );
+});

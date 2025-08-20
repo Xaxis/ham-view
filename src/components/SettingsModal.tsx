@@ -1,11 +1,14 @@
 import React, { useState } from 'react';
 import type { UserPreferences, PanelConfig } from '../types';
+import { loadQTHLocation, saveQTHLocation, type QTHLocation, maidenheadToLatLng } from '../services/localStorage';
 
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
   preferences: UserPreferences;
   onSave: (preferences: UserPreferences) => void;
+  qthLocation?: QTHLocation;
+  onQTHSave?: (location: QTHLocation) => void;
 }
 
 const defaultPanels: PanelConfig[] = [
@@ -17,15 +20,58 @@ const defaultPanels: PanelConfig[] = [
   { id: 'alerts', type: 'alerts', title: 'Alerts & Notifications', enabled: false, order: 6, size: 'small' },
 ];
 
-export default function SettingsModal({ isOpen, onClose, preferences, onSave }: SettingsModalProps) {
+export default function SettingsModal({ isOpen, onClose, preferences, onSave, qthLocation, onQTHSave }: SettingsModalProps) {
   const [localPreferences, setLocalPreferences] = useState<UserPreferences>(preferences);
-  const [activeTab, setActiveTab] = useState<'display' | 'panels' | 'data' | 'alerts'>('display');
+  const [activeTab, setActiveTab] = useState<'station' | 'display' | 'panels' | 'data' | 'alerts'>('station');
+
+  // Station settings state
+  const [stationData, setStationData] = useState({
+    callsign: qthLocation?.callsign || '',
+    gridSquare: qthLocation?.maidenhead || '',
+  });
 
   if (!isOpen) return null;
 
   const handleSave = () => {
     onSave(localPreferences);
     onClose();
+  };
+
+  const handleStationSave = () => {
+    if (!stationData.callsign.trim()) {
+      alert('Please enter your callsign');
+      return;
+    }
+
+    if (!stationData.gridSquare.trim()) {
+      alert('Please enter your grid square (e.g., FN20kr)');
+      return;
+    }
+
+    try {
+      // Convert grid square to coordinates
+      const coords = maidenheadToLatLng(stationData.gridSquare.toUpperCase());
+
+      const qthLocation: QTHLocation = {
+        callsign: stationData.callsign.toUpperCase(),
+        latitude: coords.latitude,
+        longitude: coords.longitude,
+        maidenhead: stationData.gridSquare.toUpperCase(),
+        isSet: true,
+      };
+
+      // Save to localStorage
+      saveQTHLocation(qthLocation);
+
+      // Notify parent component
+      if (onQTHSave) {
+        onQTHSave(qthLocation);
+      }
+
+      alert('Station information saved successfully!');
+    } catch (error) {
+      alert('Invalid grid square format. Please use format like FN20kr');
+    }
   };
 
   const handlePanelToggle = (panelId: string) => {
@@ -77,25 +123,31 @@ export default function SettingsModal({ isOpen, onClose, preferences, onSave }: 
 
         <div className="modal-content">
           <div className="settings-tabs">
-            <button 
+            <button
+              className={`tab-btn ${activeTab === 'station' ? 'active' : ''}`}
+              onClick={() => setActiveTab('station')}
+            >
+              📻 Station
+            </button>
+            <button
               className={`tab-btn ${activeTab === 'display' ? 'active' : ''}`}
               onClick={() => setActiveTab('display')}
             >
               Display
             </button>
-            <button 
+            <button
               className={`tab-btn ${activeTab === 'panels' ? 'active' : ''}`}
               onClick={() => setActiveTab('panels')}
             >
               Panels
             </button>
-            <button 
+            <button
               className={`tab-btn ${activeTab === 'data' ? 'active' : ''}`}
               onClick={() => setActiveTab('data')}
             >
               Data
             </button>
-            <button 
+            <button
               className={`tab-btn ${activeTab === 'alerts' ? 'active' : ''}`}
               onClick={() => setActiveTab('alerts')}
             >
@@ -104,6 +156,87 @@ export default function SettingsModal({ isOpen, onClose, preferences, onSave }: 
           </div>
 
           <div className="tab-content">
+            {activeTab === 'station' && (
+              <div className="settings-section">
+                <h3>📻 Station Information</h3>
+                <p className="section-description">
+                  Enter your callsign and grid square to enable real propagation data from PSK Reporter.
+                </p>
+
+                <div className="setting-group">
+                  <label>Your Callsign *</label>
+                  <input
+                    type="text"
+                    placeholder="e.g., KL5YT, W1AW, JA1XYZ"
+                    value={stationData.callsign}
+                    onChange={(e) => setStationData(prev => ({
+                      ...prev,
+                      callsign: e.target.value.toUpperCase()
+                    }))}
+                    className="callsign-input"
+                    style={{
+                      fontFamily: 'SF Mono, Monaco, Inconsolata, Roboto Mono, monospace',
+                      fontSize: '16px',
+                      fontWeight: '600'
+                    }}
+                  />
+                  <small>Your amateur radio callsign (required for PSK Reporter data)</small>
+                </div>
+
+                <div className="setting-group">
+                  <label>Grid Square (Maidenhead Locator) *</label>
+                  <input
+                    type="text"
+                    placeholder="e.g., FN20kr, JO65cv, QF22lb"
+                    value={stationData.gridSquare}
+                    onChange={(e) => setStationData(prev => ({
+                      ...prev,
+                      gridSquare: e.target.value.toUpperCase()
+                    }))}
+                    className="grid-input"
+                    style={{
+                      fontFamily: 'SF Mono, Monaco, Inconsolata, Roboto Mono, monospace',
+                      fontSize: '16px',
+                      fontWeight: '600'
+                    }}
+                  />
+                  <small>Your 6-character Maidenhead grid square (e.g., FN20kr)</small>
+                </div>
+
+                <div className="station-actions">
+                  <button
+                    className="primary-btn"
+                    onClick={handleStationSave}
+                    disabled={!stationData.callsign.trim() || !stationData.gridSquare.trim()}
+                  >
+                    💾 Save Station Info
+                  </button>
+                </div>
+
+                {qthLocation?.isSet && (
+                  <div className="current-station-info">
+                    <h4>Current Station</h4>
+                    <div className="station-details">
+                      <div className="detail-row">
+                        <span className="label">Callsign:</span>
+                        <span className="value">{qthLocation.callsign}</span>
+                      </div>
+                      <div className="detail-row">
+                        <span className="label">Grid Square:</span>
+                        <span className="value">{qthLocation.maidenhead}</span>
+                      </div>
+                      <div className="detail-row">
+                        <span className="label">Coordinates:</span>
+                        <span className="value">
+                          {qthLocation.latitude.toFixed(4)}°, {qthLocation.longitude.toFixed(4)}°
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             {activeTab === 'display' && (
               <div className="settings-section">
                 <h3>Display Settings</h3>

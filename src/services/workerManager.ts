@@ -214,36 +214,79 @@ export class WorkerManager {
   }
 
   private fallbackGenerateMapMarkers(spots: PropagationSpot[]): MapMarker[] {
-    // Simplified fallback implementation
+    // PSK Reporter methodology: Show RECEIVER locations as primary spots
+    // Group by precise coordinates (subsquare level) to handle clustering
+    const receiverData = new Map<string, {
+      position: { latitude: number; longitude: number };
+      callsigns: Set<string>;
+      spots: PropagationSpot[];
+      lastActivity: Date;
+      bestSNR: number;
+      worstSNR: number;
+      bands: Set<string>;
+      modes: Set<string>;
+      locators: Set<string>;
+    }>();
+
+    spots.forEach((spot) => {
+      // Only process receiver locations with valid coordinates (not 0,0)
+      if (spot.receiver.location.latitude !== 0 || spot.receiver.location.longitude !== 0) {
+        // Use higher precision for clustering (6 decimal places for subsquare accuracy)
+        const rxKey = `${spot.receiver.location.latitude.toFixed(6)}_${spot.receiver.location.longitude.toFixed(6)}`;
+
+        if (!receiverData.has(rxKey)) {
+          receiverData.set(rxKey, {
+            position: spot.receiver.location,
+            callsigns: new Set([spot.receiver.callsign]),
+            spots: [spot],
+            lastActivity: new Date(spot.timestamp),
+            bestSNR: spot.snr || -999,
+            worstSNR: spot.snr || -999,
+            bands: new Set([spot.band]),
+            modes: new Set([spot.mode]),
+            locators: new Set([spot.receiver.location.maidenhead || ''])
+          });
+        } else {
+          const data = receiverData.get(rxKey)!;
+          data.callsigns.add(spot.receiver.callsign);
+          data.spots.push(spot);
+          if (new Date(spot.timestamp) > data.lastActivity) {
+            data.lastActivity = new Date(spot.timestamp);
+          }
+          if (spot.snr && spot.snr > data.bestSNR) {
+            data.bestSNR = spot.snr;
+          }
+          if (spot.snr && spot.snr < data.worstSNR) {
+            data.worstSNR = spot.snr;
+          }
+          data.bands.add(spot.band);
+          data.modes.add(spot.mode);
+          data.locators.add(spot.receiver.location.maidenhead || '');
+        }
+      }
+    });
+
+    // Convert to markers - PSK Reporter style with clustering
     const markers: MapMarker[] = [];
-    const processed = new Set<string>();
+    let index = 0;
 
-    spots.forEach((spot, index) => {
-      const txKey = `${spot.transmitter.location.latitude},${spot.transmitter.location.longitude}`;
-      if (!processed.has(txKey)) {
-        processed.add(txKey);
-        markers.push({
-          id: `marker-tx-${index}`,
-          position: spot.transmitter.location,
-          type: 'transmitter',
-          callsign: spot.transmitter.callsign,
-          spotCount: 1,
-          lastActivity: new Date(spot.timestamp),
-        });
-      }
+    receiverData.forEach((data, key) => {
+      const callsignArray = Array.from(data.callsigns);
+      const primaryCallsign = callsignArray[0];
+      const isMultiStation = callsignArray.length > 1;
 
-      const rxKey = `${spot.receiver.location.latitude},${spot.receiver.location.longitude}`;
-      if (!processed.has(rxKey)) {
-        processed.add(rxKey);
-        markers.push({
-          id: `marker-rx-${index}`,
-          position: spot.receiver.location,
-          type: 'receiver',
-          callsign: spot.receiver.callsign,
-          spotCount: 1,
-          lastActivity: new Date(spot.timestamp),
-        });
-      }
+      markers.push({
+        id: `receiver-${index++}`,
+        position: data.position,
+        type: 'receiver', // All spots are receivers in PSK Reporter methodology
+        callsign: isMultiStation ? `${primaryCallsign} +${callsignArray.length - 1}` : primaryCallsign,
+        spotCount: data.spots.length,
+        lastActivity: data.lastActivity,
+        popup: {
+          title: isMultiStation ? `Multiple Stations (${callsignArray.length})` : `${primaryCallsign} (Monitor)`,
+          content: `${callsignArray.join(', ')} | ${data.spots.length} spots | Best: ${data.bestSNR}dB | Loc: ${Array.from(data.locators).join(', ')}`
+        }
+      });
     });
 
     return markers;

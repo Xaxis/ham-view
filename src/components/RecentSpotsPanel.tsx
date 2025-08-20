@@ -8,8 +8,10 @@ interface RecentSpotsPanelProps {
 }
 
 export default function RecentSpotsPanel({ spots, onSpotSelect, selectedSpot }: RecentSpotsPanelProps) {
-  // Show only the most recent 20 spots
-  const recentSpots = spots.slice(0, 20);
+  // Sort by timestamp (newest first) and show only the most recent 50 spots
+  const recentSpots = spots
+    .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
+    .slice(0, 50);
 
   const formatFrequency = (frequency: number): string => {
     if (frequency >= 1000000) {
@@ -34,21 +36,41 @@ export default function RecentSpotsPanel({ spots, onSpotSelect, selectedSpot }: 
     return `${diffDays}d ago`;
   };
 
-  const getSignalQuality = (snr?: number): { label: string; color: string } => {
-    if (snr === undefined) return { label: 'Unknown', color: '#6b7280' };
+  const formatDistance = (distance: number): string => {
+    if (distance < 1000) {
+      return `${Math.round(distance)} km`;
+    }
+    return `${(distance / 1000).toFixed(1)}k km`;
+  };
+
+  const getSignalQuality = (snr?: number): { label: string; color: string; icon: string } => {
+    if (snr === undefined) return { label: 'Unknown', color: '#6b7280', icon: '⚪' };
     
-    if (snr >= 0) return { label: 'Excellent', color: '#10b981' };
-    if (snr >= -10) return { label: 'Good', color: '#3b82f6' };
-    if (snr >= -20) return { label: 'Fair', color: '#f59e0b' };
-    return { label: 'Poor', color: '#ef4444' };
+    if (snr >= 0) return { label: 'Excellent', color: '#10b981', icon: '🟢' };
+    if (snr >= -10) return { label: 'Good', color: '#3b82f6', icon: '🔵' };
+    if (snr >= -20) return { label: 'Fair', color: '#f59e0b', icon: '🟡' };
+    return { label: 'Poor', color: '#ef4444', icon: '🔴' };
+  };
+
+  const getDirectionInfo = (spot: PropagationSpot) => {
+    // Determine if this is TX or RX based on the filtered callsign
+    // For now, assume transmitter is the "home" station
+    return {
+      direction: 'TX→RX',
+      from: spot.transmitter.callsign,
+      to: spot.receiver.callsign,
+      fromGrid: spot.transmitter.location.maidenhead,
+      toGrid: spot.receiver.location.maidenhead
+    };
   };
 
   if (recentSpots.length === 0) {
     return (
       <div className="recent-spots-empty">
         <div className="empty-icon">📻</div>
-        <span>No recent spots</span>
-        <small>Waiting for propagation data...</small>
+        <h3>No Recent Spots</h3>
+        <p>No propagation spots found.</p>
+        <small>Check your filters or wait for new data...</small>
       </div>
     );
   }
@@ -56,88 +78,75 @@ export default function RecentSpotsPanel({ spots, onSpotSelect, selectedSpot }: 
   return (
     <div className="recent-spots">
       <div className="spots-header">
-        <span className="spots-count">{spots.length} total spots</span>
-        <span className="spots-subtitle">Showing {recentSpots.length} most recent</span>
+        <h3>Recent Spots</h3>
+        <div className="spots-count">{recentSpots.length} of {spots.length}</div>
       </div>
-      
+
       <div className="spots-list">
         {recentSpots.map((spot) => {
           const signalQuality = getSignalQuality(spot.snr);
+          const direction = getDirectionInfo(spot);
           const isSelected = selectedSpot?.id === spot.id;
-          
+
           return (
             <div
               key={spot.id}
-              className={`spot-item ${isSelected ? 'selected' : ''}`}
+              className={`spot-row ${isSelected ? 'selected' : ''}`}
               onClick={() => onSpotSelect?.(spot)}
             >
-              <div className="spot-header">
-                <div className="spot-callsigns">
-                  <span className="transmitter">{spot.transmitter.callsign}</span>
+              {/* Time Column */}
+              <div className="spot-time">
+                {formatTime(spot.timestamp)}
+              </div>
+
+              {/* Callsigns Column */}
+              <div className="spot-callsigns">
+                <div className="callsign-pair">
+                  <span className="tx-call">{direction.from}</span>
                   <span className="arrow">→</span>
-                  <span className="receiver">{spot.receiver.callsign}</span>
+                  <span className="rx-call">{direction.to}</span>
                 </div>
-                <span className="spot-time">{formatTime(spot.timestamp)}</span>
+                <div className="grid-pair">
+                  <span className="tx-grid">{direction.fromGrid}</span>
+                  <span className="rx-grid">{direction.toGrid}</span>
+                </div>
               </div>
-              
-              <div className="spot-details">
-                <div className="frequency-band">
-                  <span className="frequency">{formatFrequency(spot.frequency)}</span>
-                  <span className="band">{spot.band}</span>
+
+              {/* Frequency & Mode Column */}
+              <div className="spot-freq">
+                <div className="frequency">{formatFrequency(spot.frequency)}</div>
+                <div className="mode-band">
                   <span className="mode">{spot.mode}</span>
-                </div>
-                
-                {spot.snr !== undefined && (
-                  <div className="signal-info">
-                    <span 
-                      className="snr-value"
-                      style={{ color: signalQuality.color }}
-                    >
-                      {spot.snr > 0 ? '+' : ''}{spot.snr} dB
-                    </span>
-                    <span 
-                      className="signal-quality"
-                      style={{ color: signalQuality.color }}
-                    >
-                      {signalQuality.label}
-                    </span>
-                  </div>
-                )}
-              </div>
-              
-              <div className="spot-locations">
-                <div className="location tx-location">
-                  <span className="location-label">TX:</span>
-                  <span className="grid-square">{spot.transmitter.location.gridSquare}</span>
-                  {spot.transmitter.location.name && (
-                    <span className="location-name">{spot.transmitter.location.name}</span>
-                  )}
-                </div>
-                <div className="location rx-location">
-                  <span className="location-label">RX:</span>
-                  <span className="grid-square">{spot.receiver.location.gridSquare}</span>
-                  {spot.receiver.location.name && (
-                    <span className="location-name">{spot.receiver.location.name}</span>
-                  )}
+                  <span className="band">{spot.band}</span>
                 </div>
               </div>
-              
-              <div className="spot-source">
-                <span className="source-label">Source:</span>
-                <span className="source-value">{spot.source.replace('_', ' ')}</span>
+
+              {/* Signal Column */}
+              <div className="spot-signal">
+                <div className="snr-value" style={{ color: signalQuality.color }}>
+                  {spot.snr !== undefined ? `${spot.snr > 0 ? '+' : ''}${spot.snr}` : 'N/A'}
+                  <span className="snr-unit">dB</span>
+                </div>
+                <div className="signal-bar">
+                  <div
+                    className="signal-fill"
+                    style={{
+                      width: `${Math.max(0, Math.min(100, (spot.snr || -30) + 30))}%`,
+                      backgroundColor: signalQuality.color
+                    }}
+                  />
+                </div>
+              </div>
+
+              {/* Distance Column */}
+              <div className="spot-distance">
+                <div className="distance-value">{formatDistance(spot.distance)}</div>
+                <div className="bearing">{Math.round(spot.bearing)}°</div>
               </div>
             </div>
           );
         })}
       </div>
-      
-      {spots.length > recentSpots.length && (
-        <div className="spots-footer">
-          <span className="more-spots">
-            +{spots.length - recentSpots.length} more spots available
-          </span>
-        </div>
-      )}
     </div>
   );
 }

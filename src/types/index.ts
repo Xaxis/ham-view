@@ -1,5 +1,22 @@
 // Core PropView Types and Interfaces
 
+// Storage keys for localStorage
+export const STORAGE_KEYS = {
+  PROFILES: 'propview_profiles',
+  APP_STATE: 'propview_app_state',
+} as const;
+
+// Default tile configuration
+export const DEFAULT_TILE_SIZE = {
+  width: 400,
+  height: 300,
+} as const;
+
+export const DEFAULT_TILE_POSITION = {
+  x: 100,
+  y: 100,
+} as const;
+
 // Geographic coordinates
 export interface Coordinates {
   latitude: number;
@@ -200,6 +217,15 @@ export interface AlertCondition {
   };
 }
 
+// Data sync status
+export interface SyncStatus {
+  lastSync: Date | null;
+  nextSync: Date | null;
+  isAutoRefresh: boolean;
+  intervalMinutes: number;
+  isSyncing: boolean;
+}
+
 // Application state
 export interface AppState {
   isLoading: boolean;
@@ -211,6 +237,7 @@ export interface AppState {
   filters: FilterSettings;
   preferences: UserPreferences;
   selectedSpot: PropagationSpot | null;
+  syncStatus: SyncStatus;
 }
 
 // API response types

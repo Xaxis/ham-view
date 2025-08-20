@@ -8,24 +8,32 @@ interface SolarDataPanelProps {
 export default function SolarDataPanel({ solarData }: SolarDataPanelProps) {
   if (!solarData) {
     return (
-      <div className="solar-data-empty">
-        <div className="empty-icon">☀️</div>
-        <span>No solar data available</span>
-        <small>Waiting for space weather data...</small>
+      <div className="solar-data">
+        <div className="solar-data-empty">
+          <div className="empty-icon">☀️</div>
+          <span>No solar data available</span>
+          <small>Waiting for space weather data...</small>
+        </div>
       </div>
     );
   }
 
-  const getStormColor = (storm: SolarData['geomagneticStorm']) => {
-    switch (storm) {
-      case 'EXTREME': return '#dc2626'; // Red
-      case 'SEVERE': return '#ea580c'; // Orange-red
-      case 'STRONG': return '#f59e0b'; // Orange
-      case 'MODERATE': return '#eab308'; // Yellow
-      case 'MINOR': return '#84cc16'; // Yellow-green
-      case 'NONE': return '#10b981'; // Green
-      default: return '#6b7280'; // Gray
-    }
+  const getStormColor = (kIndex: number) => {
+    if (kIndex >= 9) return '#dc2626'; // Red - Extreme
+    if (kIndex >= 7) return '#ea580c'; // Orange-red - Severe
+    if (kIndex >= 6) return '#f59e0b'; // Orange - Strong
+    if (kIndex >= 5) return '#eab308'; // Yellow - Moderate
+    if (kIndex >= 4) return '#84cc16'; // Yellow-green - Minor
+    return '#10b981'; // Green - Quiet
+  };
+
+  const getStormLevel = (kIndex: number) => {
+    if (kIndex >= 9) return 'EXTREME';
+    if (kIndex >= 7) return 'SEVERE';
+    if (kIndex >= 6) return 'STRONG';
+    if (kIndex >= 5) return 'MODERATE';
+    if (kIndex >= 4) return 'MINOR';
+    return 'QUIET';
   };
 
   const getIndexColor = (value: number, type: 'k' | 'a' | 'sfi') => {
@@ -57,34 +65,34 @@ export default function SolarDataPanel({ solarData }: SolarDataPanelProps) {
   return (
     <div className="solar-data">
       <div className="solar-header">
-        <div className="last-update">
-          <span className="update-label">Last Update:</span>
-          <span className="update-time">{formatTimestamp(solarData.timestamp)}</span>
+        <h3>Solar & Geomagnetic</h3>
+        <div className="solar-status">
+          <div className="solar-timestamp">{formatTimestamp(solarData.timestamp)}</div>
+          {solarData.kIndex >= 4 && (
+            <div
+              className="storm-alert"
+              style={{ backgroundColor: getStormColor(solarData.kIndex) }}
+            >
+              <span className="storm-icon">⚠️</span>
+              <span className="storm-text">{getStormLevel(solarData.kIndex)}</span>
+            </div>
+          )}
         </div>
-        
-        {solarData.geomagneticStorm !== 'NONE' && (
-          <div 
-            className="storm-alert"
-            style={{ backgroundColor: getStormColor(solarData.geomagneticStorm) }}
-          >
-            <span className="storm-icon">⚠️</span>
-            <span className="storm-text">{solarData.geomagneticStorm} STORM</span>
-          </div>
-        )}
       </div>
 
-      <div className="solar-indices">
+      <div className="solar-content">
+        <div className="solar-indices">
         <div className="index-grid">
           <div className="index-item">
             <div className="index-header">
               <span className="index-name">Solar Flux</span>
               <span className="index-unit">SFU</span>
             </div>
-            <div 
+            <div
               className="index-value"
-              style={{ color: getIndexColor(solarData.solarFluxIndex, 'sfi') }}
+              style={{ color: getIndexColor(solarData.solarFluxIndex || 0, 'sfi') }}
             >
-              {solarData.solarFluxIndex.toFixed(1)}
+              {(solarData.solarFluxIndex || 0).toFixed(1)}
             </div>
             <div className="index-description">
               10.7cm radio flux
@@ -96,11 +104,11 @@ export default function SolarDataPanel({ solarData }: SolarDataPanelProps) {
               <span className="index-name">K-Index</span>
               <span className="index-unit">0-9</span>
             </div>
-            <div 
+            <div
               className="index-value"
-              style={{ color: getIndexColor(solarData.kIndex, 'k') }}
+              style={{ color: getIndexColor(solarData.kIndex || 0, 'k') }}
             >
-              {solarData.kIndex}
+              {solarData.kIndex || 0}
             </div>
             <div className="index-description">
               Geomagnetic activity
@@ -112,11 +120,11 @@ export default function SolarDataPanel({ solarData }: SolarDataPanelProps) {
               <span className="index-name">A-Index</span>
               <span className="index-unit">nT</span>
             </div>
-            <div 
+            <div
               className="index-value"
-              style={{ color: getIndexColor(solarData.aIndex, 'a') }}
+              style={{ color: getIndexColor(solarData.aIndex || 0, 'a') }}
             >
-              {solarData.aIndex}
+              {solarData.aIndex || 0}
             </div>
             <div className="index-description">
               Daily geomagnetic activity
@@ -125,33 +133,19 @@ export default function SolarDataPanel({ solarData }: SolarDataPanelProps) {
 
           <div className="index-item">
             <div className="index-header">
-              <span className="index-name">Sunspots</span>
-              <span className="index-unit">SSN</span>
+              <span className="index-name">Solar Wind</span>
+              <span className="index-unit">km/s</span>
             </div>
             <div className="index-value">
-              {solarData.sunspotNumber}
+              {(solarData as any).solarWindSpeed || 'N/A'}
             </div>
             <div className="index-description">
-              Sunspot number
+              Solar wind speed
             </div>
           </div>
         </div>
 
-        {solarData.xrayFlux && (
-          <div className="xray-section">
-            <h4>X-Ray Flux</h4>
-            <div className="xray-grid">
-              <div className="xray-item">
-                <span className="xray-label">Short (0.1-0.8nm):</span>
-                <span className="xray-value">{solarData.xrayFlux.short.toExponential(2)}</span>
-              </div>
-              <div className="xray-item">
-                <span className="xray-label">Long (0.05-0.4nm):</span>
-                <span className="xray-value">{solarData.xrayFlux.long.toExponential(2)}</span>
-              </div>
-            </div>
-          </div>
-        )}
+
       </div>
 
       <div className="solar-impact">
@@ -190,6 +184,7 @@ export default function SolarDataPanel({ solarData }: SolarDataPanelProps) {
             </span>
           )}
         </div>
+      </div>
       </div>
     </div>
   );

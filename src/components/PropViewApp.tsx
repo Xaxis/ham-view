@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import type { AppState, FilterSettings, UserPreferences, Location, PanelConfig } from '../types';
-import { dataManager } from '../services/dataManager';
+import { pskReporterJSONP } from '../services/pskReporterJSONP';
 import PropagationMap from './PropagationMap';
 import BandConditionsPanel from './BandConditionsPanel';
 import RecentSpotsPanel from './RecentSpotsPanel';
@@ -9,6 +9,18 @@ import StatisticsPanel from './StatisticsPanel';
 import SettingsModal from './SettingsModal';
 import AdvancedFilterSidebar from './AdvancedFilterSidebar';
 import MapLayersModal, { type MapLayer } from './MapLayersModal';
+import SyncStatusIndicator from './SyncStatusIndicator';
+import {
+  loadUserPreferences,
+  saveUserPreferences,
+  loadFilterSettings,
+  saveFilterSettings,
+  loadQTHLocation,
+  saveQTHLocation,
+  loadMapLayers,
+  saveMapLayers,
+  type QTHLocation
+} from '../services/localStorage';
 
 // Default panels configuration for tabbed layout
 const defaultPanels: PanelConfig[] = [
@@ -104,6 +116,13 @@ const initialState: AppState = {
   filters: defaultFilters,
   preferences: defaultPreferences,
   selectedSpot: null,
+  syncStatus: {
+    lastSync: null,
+    nextSync: null,
+    isAutoRefresh: true,
+    intervalMinutes: 5,
+    isSyncing: false,
+  },
 };
 
 export default function PropViewApp() {
@@ -115,32 +134,32 @@ export default function PropViewApp() {
   const [isResizing, setIsResizing] = useState(false);
   const [mapSplitRatio, setMapSplitRatio] = useState(70);
   const [mapLayers, setMapLayers] = useState<MapLayer[]>(defaultMapLayers);
+  const [qthLocation, setQTHLocation] = useState<QTHLocation | null>(null);
 
   // Data update handler
   const handleDataUpdate = useCallback(async (data: {
-    spots: any[];
-    solarData: any;
-    bandConditions: any[];
-    lastUpdate: Date;
+    spots?: any[];
+    solarData?: any;
+    bandConditions?: any[];
+    lastUpdate?: Date;
   }) => {
     setState(prev => ({
       ...prev,
-      spots: data.spots,
-      solarData: data.solarData,
-      bandConditions: data.bandConditions,
-      lastUpdate: data.lastUpdate,
+      spots: data.spots || [],
+      solarData: data.solarData || null,
+      bandConditions: data.bandConditions || [],
+      lastUpdate: data.lastUpdate || new Date(),
       isLoading: false,
       error: null,
     }));
 
     // Update map data asynchronously
     try {
-      const newMapData = await dataManager.getMapData();
-      setMapData(newMapData);
+      // Simple map data - we'll generate this from spots
+      setMapData({ markers: [], paths: [] });
     } catch (error) {
       console.warn('Failed to update map data:', error);
-      // Use synchronous fallback
-      setMapData(dataManager.getMapDataSync());
+      setMapData({ markers: [], paths: [] });
     }
   }, []);
 
@@ -179,26 +198,109 @@ export default function PropViewApp() {
     }
   }, []);
 
-  // Setup data manager listeners
+  // Setup PSK Reporter JSONP listeners
   useEffect(() => {
-    const unsubscribeData = dataManager.onDataUpdate(handleDataUpdate);
-    const unsubscribeError = dataManager.onError(handleError);
+    const unsubscribe = pskReporterJSONP.subscribe(handleDataUpdate);
+    return unsubscribe;
+  }, [handleDataUpdate]);
+
+  // Initialize app - load saved data and check for first-time user
+  useEffect(() => {
+    // Load saved preferences
+    const savedPreferences = loadUserPreferences();
+    if (savedPreferences) {
+      setState(prev => ({ ...prev, preferences: savedPreferences }));
+    }
+
+    // Load saved filters
+    const savedFilters = loadFilterSettings();
+    if (savedFilters) {
+      setState(prev => ({ ...prev, filters: savedFilters }));
+    }
+
+    // Load saved QTH location
+    const savedQTH = loadQTHLocation();
+    if (savedQTH) {
+      setQTHLocation(savedQTH);
+    }
+
+    // Load saved map layers
+    const savedLayers = loadMapLayers();
+    if (savedLayers) {
+      setMapLayers(savedLayers);
+    }
+
+    // If QTH is configured, set up callsign in PSK Reporter and filters
+    if (savedQTH && savedQTH.isSet && savedQTH.callsign) {
+      // Set callsign in PSK Reporter JSONP
+      pskReporterJSONP.setUserCallsign(savedQTH.callsign);
+
+      // Auto-set the callsign search filter for existing users (both TX and RX)
+      setState(prev => ({
+        ...prev,
+        filters: {
+          ...prev.filters,
+          callsign: {
+            ...prev.filters.callsign,
+            search: savedQTH.callsign.toUpperCase(),
+            transmitterOnly: false,  // Show spots where user is TX OR RX
+            receiverOnly: false      // Show both directions
+          }
+        }
+      }));
+      console.log(`🔍 Auto-set callsign filter for existing user: ${savedQTH.callsign.toUpperCase()}`);
+    }
+  }, []);
+
+  // Save preferences when they change
+  useEffect(() => {
+    saveUserPreferences(state.preferences);
+  }, [state.preferences]);
+
+  // Load data on app startup - CLEAN VERSION
+  useEffect(() => {
+    console.log('🚀 App startup - loading data...');
+    handleRefresh();
+  }, []); // Only run once on startup
+
+  // Save filters when they change
+  useEffect(() => {
+    saveFilterSettings(state.filters);
+  }, [state.filters]);
+
+  // Refresh data when filters change (only for filters that affect API calls)
+  useEffect(() => {
+    handleRefresh();
+  }, [state.filters.bands, state.filters.modes, state.filters.callsign, state.filters.timeRange]);
+
+  // Save map layers when they change
+  useEffect(() => {
+    saveMapLayers(mapLayers);
+  }, [mapLayers]);
+
+  // Start auto-refresh when preferences change - only if callsign is set
+  useEffect(() => {
+    if (!qthLocation || !qthLocation.isSet || !qthLocation.callsign) {
+      console.log('⏸️ Auto-refresh paused - waiting for user callsign');
+      return;
+    }
+
+    console.log(`🔄 Auto-refresh enabled for callsign: ${qthLocation.callsign}`);
+
+    // Trigger initial refresh
+    handleRefresh();
+
+    // Set up interval for auto-refresh
+    const intervalMs = state.preferences.dataRefreshInterval * 1000;
+    const interval = setInterval(() => {
+      console.log('🔄 Auto-refresh triggered');
+      handleRefresh();
+    }, intervalMs);
 
     return () => {
-      unsubscribeData();
-      unsubscribeError();
+      clearInterval(interval);
     };
-  }, [handleDataUpdate, handleError]);
-
-  // Start auto-refresh when preferences change
-  useEffect(() => {
-    const intervalMinutes = state.preferences.dataRefreshInterval / 60; // Convert seconds to minutes
-    dataManager.startAutoRefresh(intervalMinutes, state.filters);
-
-    return () => {
-      dataManager.stopAutoRefresh();
-    };
-  }, [state.preferences.dataRefreshInterval, state.filters]);
+  }, [state.preferences.dataRefreshInterval, state.filters, qthLocation?.isSet, qthLocation?.callsign]);
 
   // Set active tab to first enabled panel when preferences change
   useEffect(() => {
@@ -229,12 +331,268 @@ export default function PropViewApp() {
     }
   }, [state.preferences.displaySettings.theme]);
 
-  const updateFilters = (newFilters: Partial<FilterSettings>) => {
+  const updateFilters = useCallback((newFilters: Partial<FilterSettings>) => {
     setState(prev => ({
       ...prev,
       filters: { ...prev.filters, ...newFilters },
     }));
-  };
+  }, []);
+
+  // Apply filters to spots for display (CLIENT-SIDE FILTERING LIKE PSK REPORTER)
+  const filteredSpots = useMemo(() => {
+    // CRITICAL FIX: Deduplicate spots by ID to prevent React key conflicts
+    const uniqueSpots = state.spots.reduce((acc, spot) => {
+      if (!acc.has(spot.id)) {
+        acc.set(spot.id, spot);
+      }
+      return acc;
+    }, new Map());
+
+    let filtered = Array.from(uniqueSpots.values());
+
+    // Apply band filter - If no bands selected, show NOTHING
+    if (state.filters.bands.length === 0) {
+      return [];
+    } else {
+      filtered = filtered.filter(spot => state.filters.bands.includes(spot.band));
+    }
+
+    // Apply mode filter - If no modes selected, show NOTHING
+    if (state.filters.modes.length === 0) {
+      return [];
+    } else {
+      filtered = filtered.filter(spot => state.filters.modes.includes(spot.mode));
+    }
+
+    // Apply callsign filter
+    if (state.filters.callsign.search) {
+      const searchTerm = state.filters.callsign.search.toUpperCase();
+
+      filtered = filtered.filter(spot => {
+        // Handle exact match vs partial match
+        let txMatch, rxMatch;
+        if (state.filters.callsign.exactMatch) {
+          txMatch = spot.transmitter.callsign.toUpperCase() === searchTerm;
+          rxMatch = spot.receiver.callsign.toUpperCase() === searchTerm;
+        } else {
+          txMatch = spot.transmitter.callsign.toUpperCase().includes(searchTerm);
+          rxMatch = spot.receiver.callsign.toUpperCase().includes(searchTerm);
+        }
+
+        if (state.filters.callsign.transmitterOnly) return txMatch;
+        if (state.filters.callsign.receiverOnly) return rxMatch;
+        return txMatch || rxMatch;
+      });
+    }
+
+    // Apply time range filter - STRICT TIME FILTERING
+    const now = new Date();
+    let startTime = state.filters.timeRange.start;
+    let endTime = state.filters.timeRange.end;
+
+    // If using a preset, recalculate the time range dynamically
+    if (state.filters.timeRange.preset !== 'custom') {
+      switch (state.filters.timeRange.preset) {
+        case 'last-hour':
+          startTime = new Date(now.getTime() - 60 * 60 * 1000);
+          endTime = now;
+          break;
+        case 'last-6h':
+          startTime = new Date(now.getTime() - 6 * 60 * 60 * 1000);
+          endTime = now;
+          break;
+        case 'last-24h':
+          startTime = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+          endTime = now;
+          break;
+      }
+    }
+
+    // Apply time filtering - respect the actual filter settings
+    filtered = filtered.filter(spot => {
+      const spotTime = spot.timestamp;
+      return spotTime >= startTime && spotTime <= endTime;
+    });
+
+    // Apply signal quality filters (CLIENT-SIDE ONLY - no API calls)
+    if (state.filters.signal.minSnr !== undefined) {
+      filtered = filtered.filter(spot => (spot.snr || -999) >= state.filters.signal.minSnr!);
+    }
+
+    if (state.filters.signal.maxSnr !== undefined) {
+      filtered = filtered.filter(spot => (spot.snr || 999) <= state.filters.signal.maxSnr!);
+    }
+
+    // Apply signal quality threshold filter
+    if (state.filters.signal.qualityThreshold !== 'all') {
+      filtered = filtered.filter(spot => {
+        const snr = spot.snr || -999;
+        switch (state.filters.signal.qualityThreshold) {
+          case 'excellent': return snr >= 10;
+          case 'good': return snr >= 0;
+          case 'fair': return snr >= -10;
+          case 'poor': return snr >= -20;
+          default: return true;
+        }
+      });
+    }
+
+    return filtered;
+  }, [state.spots, state.filters]);
+
+  // Create intelligent propagation map data
+  const filteredMapData = useMemo(() => {
+    const markers: any[] = [];
+    const paths: any[] = [];
+    const homeStations = new Map(); // Track unique transmitter locations
+    const receiverStations = new Map(); // Track unique receiver locations
+
+    console.log(`🗺️ CREATING MAP DATA from ${filteredSpots.length} filtered spots`);
+
+    // First pass: Identify unique home stations and receivers
+    filteredSpots.forEach(spot => {
+      // Track home stations (transmitters) - these are the "source" stations
+      if (spot.transmitter.location.latitude && spot.transmitter.location.longitude) {
+        const key = `${spot.transmitter.callsign}_${spot.transmitter.location.latitude}_${spot.transmitter.location.longitude}`;
+        if (!homeStations.has(key)) {
+          homeStations.set(key, {
+            callsign: spot.transmitter.callsign,
+            position: {
+              latitude: spot.transmitter.location.latitude,
+              longitude: spot.transmitter.location.longitude,
+              maidenhead: spot.transmitter.location.maidenhead
+            },
+            spotCount: 0,
+            bands: new Set(),
+            modes: new Set(),
+            latestSpot: spot.timestamp
+          });
+        }
+        const station = homeStations.get(key);
+        station.spotCount++;
+        station.bands.add(spot.band);
+        station.modes.add(spot.mode);
+        if (spot.timestamp > station.latestSpot) {
+          station.latestSpot = spot.timestamp;
+        }
+      }
+
+      // Track receiver stations - these heard the home station
+      if (spot.receiver.location.latitude && spot.receiver.location.longitude) {
+        const key = `${spot.receiver.callsign}_${spot.receiver.location.latitude}_${spot.receiver.location.longitude}`;
+        if (!receiverStations.has(key)) {
+          receiverStations.set(key, {
+            callsign: spot.receiver.callsign,
+            position: {
+              latitude: spot.receiver.location.latitude,
+              longitude: spot.receiver.location.longitude,
+              maidenhead: spot.receiver.location.maidenhead
+            },
+            spotCount: 0,
+            bestSNR: -50,
+            worstSNR: 50,
+            bands: new Set(),
+            modes: new Set()
+          });
+        }
+        const station = receiverStations.get(key);
+        station.spotCount++;
+        station.bestSNR = Math.max(station.bestSNR, spot.snr);
+        station.worstSNR = Math.min(station.worstSNR, spot.snr);
+        station.bands.add(spot.band);
+        station.modes.add(spot.mode);
+      }
+    });
+
+    // Create home station markers (large, distinctive - these are the "source" stations)
+    homeStations.forEach((station, key) => {
+      markers.push({
+        id: `home_${key}`,
+        type: 'home',
+        position: station.position,
+        callsign: station.callsign,
+        frequency: 0, // Not applicable for home stations
+        mode: Array.from(station.modes).join(', '),
+        spotCount: station.spotCount,
+        bands: Array.from(station.bands),
+        modes: Array.from(station.modes),
+        latestActivity: station.latestSpot
+      });
+    });
+
+    // Create receiver markers (smaller, color-coded by signal quality)
+    receiverStations.forEach((station, key) => {
+      const avgSNR = (station.bestSNR + station.worstSNR) / 2;
+      let quality = 'poor';
+      if (avgSNR >= 0) quality = 'excellent';
+      else if (avgSNR >= -10) quality = 'good';
+      else if (avgSNR >= -20) quality = 'fair';
+
+      markers.push({
+        id: `receiver_${key}`,
+        type: 'receiver',
+        position: station.position,
+        callsign: station.callsign,
+        frequency: 0, // Not applicable for receivers
+        mode: Array.from(station.modes).join(', '),
+        spotCount: station.spotCount,
+        bestSNR: station.bestSNR,
+        worstSNR: station.worstSNR,
+        quality,
+        bands: Array.from(station.bands),
+        modes: Array.from(station.modes)
+      });
+    });
+
+    // Create propagation paths (great circle arcs from home to receivers)
+    filteredSpots.forEach(spot => {
+      if (spot.transmitter.location.latitude && spot.transmitter.location.longitude &&
+          spot.receiver.location.latitude && spot.receiver.location.longitude) {
+
+        // Determine path quality based on SNR
+        let quality = 'poor';
+        if (spot.snr >= 0) quality = 'excellent';
+        else if (spot.snr >= -10) quality = 'good';
+        else if (spot.snr >= -20) quality = 'fair';
+
+        const distance = calculateDistance(
+          spot.transmitter.location.latitude,
+          spot.transmitter.location.longitude,
+          spot.receiver.location.latitude,
+          spot.receiver.location.longitude
+        );
+        const bearing = calculateBearing(
+          spot.transmitter.location.latitude,
+          spot.transmitter.location.longitude,
+          spot.receiver.location.latitude,
+          spot.receiver.location.longitude
+        );
+
+        paths.push({
+          id: `path-${spot.id}`,
+          from: spot.transmitter.location,
+          to: spot.receiver.location,
+          frequency: spot.frequency,
+          snr: spot.snr,
+          mode: spot.mode,
+          quality,
+          distance,
+          bearing,
+          band: spot.band,
+          timestamp: spot.timestamp
+        });
+      }
+    });
+
+    console.log(`🗺️ INTELLIGENT MAP DATA:`, {
+      filteredSpotsCount: filteredSpots.length,
+      homeStations: homeStations.size,
+      receiverStations: receiverStations.size,
+      totalMarkers: markers.length,
+      propagationPaths: paths.length
+    });
+    return { markers, paths };
+  }, [filteredSpots]);
 
   const updatePreferences = (newPreferences: Partial<UserPreferences>) => {
     setState(prev => ({
@@ -252,11 +610,48 @@ export default function PropViewApp() {
   };
 
   const handleRefresh = async () => {
-    setLoading(true);
+    const now = new Date();
+
+    // Update sync status to show syncing
+    setState(prev => ({
+      ...prev,
+      isLoading: true,
+      syncStatus: {
+        ...prev.syncStatus,
+        isSyncing: true,
+      }
+    }));
+
     try {
-      await dataManager.refreshData(state.filters);
+      await pskReporterJSONP.refreshData(state.filters);
+
+      // Calculate next sync time
+      const nextSync = new Date(now.getTime() + (state.syncStatus.intervalMinutes * 60 * 1000));
+
+      // Update sync status with successful sync
+      setState(prev => ({
+        ...prev,
+        isLoading: false,
+        lastUpdate: now,
+        syncStatus: {
+          ...prev.syncStatus,
+          lastSync: now,
+          nextSync: nextSync,
+          isSyncing: false,
+        }
+      }));
     } catch (error) {
       console.error('Error refreshing data:', error);
+
+      // Update sync status with error
+      setState(prev => ({
+        ...prev,
+        isLoading: false,
+        syncStatus: {
+          ...prev.syncStatus,
+          isSyncing: false,
+        }
+      }));
     }
   };
 
@@ -351,11 +746,11 @@ export default function PropViewApp() {
 
     switch (activePanel.type) {
       case 'band-conditions':
-        return <BandConditionsPanel conditions={state.bandConditions} />;
+        return <BandConditionsPanel spots={filteredSpots} />;
       case 'recent-spots':
         return (
           <RecentSpotsPanel
-            spots={state.spots}
+            spots={filteredSpots}
             onSpotSelect={(spot) => setState(prev => ({ ...prev, selectedSpot: spot }))}
             selectedSpot={state.selectedSpot}
           />
@@ -365,7 +760,7 @@ export default function PropViewApp() {
       case 'statistics':
         return (
           <StatisticsPanel
-            spots={state.spots}
+            spots={filteredSpots}
             bandConditions={state.bandConditions}
           />
         );
@@ -401,26 +796,16 @@ export default function PropViewApp() {
             <span className="app-subtitle">Advanced Propagation Tracking</span>
           </div>
           
+          <div className="header-center">
+            <SyncStatusIndicator
+              syncStatus={state.syncStatus}
+              onManualSync={handleRefresh}
+            />
+          </div>
+
           <div className="header-right">
             <div className="status-indicators">
-              {dataManager.isDemoMode() && (
-                <div className="status-indicator demo-mode">
-                  <span>🎭 Demo Mode</span>
-                </div>
-              )}
-
-              {state.isLoading && (
-                <div className="status-indicator loading">
-                  <div className="loading-spinner"></div>
-                  <span>Loading...</span>
-                </div>
-              )}
-
-              {state.lastUpdate && (
-                <div className="status-indicator last-update">
-                  <span>Last update: {state.lastUpdate.toLocaleTimeString()}</span>
-                </div>
-              )}
+              {/* Demo mode indicator removed - using real proxy data */}
 
               {state.error && (
                 <div className="status-indicator error">
@@ -464,8 +849,8 @@ export default function PropViewApp() {
           <AdvancedFilterSidebar
             filters={state.filters}
             onFiltersChange={updateFilters}
-            spotCount={state.spots.length}
-            bandCount={state.bandConditions.length}
+            spotCount={filteredSpots?.length || 0}
+            bandCount={state.bandConditions?.length || 0}
           />
         </aside>
 
@@ -496,19 +881,17 @@ export default function PropViewApp() {
                 </button>
               </div>
             </div>
-            <div className="map-container">
+            <div className="map-container" style={{ height: '100%', width: '100%' }}>
               <PropagationMap
-                markers={mapData.markers}
-                paths={mapData.paths}
-                spots={state.spots}
+                markers={filteredMapData.markers}
+                paths={filteredMapData.paths}
+                spots={filteredSpots}
                 onSpotSelect={(spot) => setState(prev => ({ ...prev, selectedSpot: spot }))}
                 selectedSpot={state.selectedSpot}
                 mapStyle={state.preferences.displaySettings.mapStyle}
-                layers={{
-                  daynight: mapLayers.find(l => l.id === 'daynight')?.enabled || false,
-                  spots: mapLayers.find(l => l.id === 'spots')?.enabled || true,
-                  paths: mapLayers.find(l => l.id === 'paths')?.enabled || true,
-                }}
+                layers={mapLayers}
+                kIndex={state.solarData?.kIndex || 3}
+                mapZoom={1} // TODO: Get actual map zoom level
               />
             </div>
           </div>
@@ -558,6 +941,31 @@ export default function PropViewApp() {
         onClose={() => setShowSettings(false)}
         preferences={state.preferences}
         onSave={updatePreferences}
+        qthLocation={qthLocation}
+        onQTHSave={(location) => {
+          setQTHLocation(location);
+          saveQTHLocation(location);
+
+          // Set user callsign in PSK Reporter JSONP
+          if (location.callsign) {
+            pskReporterJSONP.setUserCallsign(location.callsign);
+
+            // Auto-set the callsign search filter
+            setState(prev => ({
+              ...prev,
+              filters: {
+                ...prev.filters,
+                callsign: {
+                  ...prev.filters.callsign,
+                  search: location.callsign.toUpperCase(),
+                  transmitterOnly: false,
+                  receiverOnly: false
+                }
+              }
+            }));
+            console.log(`🔍 Updated callsign filter: ${location.callsign.toUpperCase()}`);
+          }
+        }}
       />
 
       {/* Map Layers Modal */}
@@ -570,6 +978,33 @@ export default function PropViewApp() {
         mapStyle={state.preferences.displaySettings.mapStyle}
         onMapStyleChange={handleMapStyleChange}
       />
+
+
     </div>
   );
+}
+
+// Helper functions for map data calculation
+function calculateDistance(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371; // Earth's radius in kilometers
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+            Math.sin(dLng / 2) * Math.sin(dLng / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+function calculateBearing(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const lat1Rad = lat1 * Math.PI / 180;
+  const lat2Rad = lat2 * Math.PI / 180;
+
+  const y = Math.sin(dLng) * Math.cos(lat2Rad);
+  const x = Math.cos(lat1Rad) * Math.sin(lat2Rad) -
+            Math.sin(lat1Rad) * Math.cos(lat2Rad) * Math.cos(dLng);
+
+  const bearing = Math.atan2(y, x) * 180 / Math.PI;
+  return (bearing + 360) % 360; // Normalize to 0-360
 }

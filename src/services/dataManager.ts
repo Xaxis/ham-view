@@ -3,7 +3,6 @@
 import { PropagationDataService } from './api';
 import { DataProcessor } from './dataProcessor';
 import { workerManager } from './workerManager';
-import { demoDataGenerator } from './demoData';
 import type {
   PropagationSpot,
   SolarData,
@@ -80,7 +79,6 @@ export class DataManager {
   private errorListeners: ErrorListener[] = [];
   private updateInterval: number | null = null;
   private isUpdating = false;
-  private demoMode = true; // Start in demo mode due to CORS limitations
 
   // Current data state
   private currentData: {
@@ -155,15 +153,7 @@ export class DataManager {
     });
   }
 
-  // Demo mode methods
-  setDemoMode(enabled: boolean): void {
-    this.demoMode = enabled;
-    console.log(`Demo mode ${enabled ? 'enabled' : 'disabled'}`);
-  }
 
-  isDemoMode(): boolean {
-    return this.demoMode;
-  }
 
   // Data fetching methods
   async fetchData(filters: FilterSettings): Promise<void> {
@@ -175,11 +165,6 @@ export class DataManager {
     this.isUpdating = true;
 
     try {
-      // Use demo data if in demo mode or if real APIs fail
-      if (this.demoMode) {
-        await this.fetchDemoData(filters);
-        return;
-      }
       // Check cache first
       const cacheKey = this.generateCacheKey(filters);
       const cachedData = this.cache.get<{
@@ -262,34 +247,7 @@ export class DataManager {
     }
   }
 
-  // Fetch demo data
-  private async fetchDemoData(filters: FilterSettings): Promise<void> {
-    console.log('Fetching demo propagation data...');
 
-    // Generate demo spots
-    const timeRangeMinutes = Math.floor((filters.timeRange.end.getTime() - filters.timeRange.start.getTime()) / (1000 * 60));
-    const spotCount = Math.min(200, Math.max(50, timeRangeMinutes * 2)); // Scale with time range
-
-    let demoSpots = demoDataGenerator.generateSpots(spotCount, timeRangeMinutes);
-
-    // Apply advanced filters
-    demoSpots = this.applyAdvancedFilters(demoSpots, filters);
-
-    // Generate demo solar data
-    const demoSolarData = demoDataGenerator.generateSolarData();
-
-    // Process data using Web Worker
-    const bandConditions = await workerManager.analyzeBandConditions(demoSpots);
-
-    // Update current data
-    this.currentData.spots = demoSpots;
-    this.currentData.solarData = demoSolarData;
-    this.currentData.bandConditions = bandConditions;
-    this.currentData.lastUpdate = new Date();
-
-    this.notifyDataUpdate();
-    console.log(`Demo data updated: ${demoSpots.length} spots, ${bandConditions.length} bands`);
-  }
 
   // Auto-refresh functionality
   startAutoRefresh(intervalMinutes: number, filters: FilterSettings): void {
