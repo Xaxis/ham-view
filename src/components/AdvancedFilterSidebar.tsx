@@ -427,6 +427,36 @@ function AdvancedFilterSidebar({
               })}
             />
           </div>
+          <div className="distance-range">
+            <label>Distance Range (km)</label>
+            <div className="range-inputs">
+              <input
+                type="number"
+                placeholder="Min"
+                value={filters.geographic.minDistance || ''}
+                onChange={(e) => onFiltersChange({
+                  ...filters,
+                  geographic: {
+                    ...filters.geographic,
+                    minDistance: e.target.value ? parseFloat(e.target.value) : undefined
+                  }
+                })}
+              />
+              <span>to</span>
+              <input
+                type="number"
+                placeholder="Max"
+                value={filters.geographic.maxDistance || ''}
+                onChange={(e) => onFiltersChange({
+                  ...filters,
+                  geographic: {
+                    ...filters.geographic,
+                    maxDistance: e.target.value ? parseFloat(e.target.value) : undefined
+                  }
+                })}
+              />
+            </div>
+          </div>
         </div>
       </FilterSection>
     </div>

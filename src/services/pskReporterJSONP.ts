@@ -81,24 +81,16 @@ export class PSKReporterJSONP {
           return;
         }
 
-        // CRITICAL FIX: Use filter checkboxes to determine query type
+        // Load ALL data for the callsign - filters only affect rendering, not data retrieval
         const params = new URLSearchParams({
-          rptlimit: '500',
+          rptlimit: '1000', // Get more data since filters are client-side only
           callback: callbackName,
           flowStartSeconds: startTime.toString()
         });
 
-        // Apply callsign filter based on checkboxes
-        if (filters.callsign.transmitterOnly) {
-          // Show signals transmitted BY this callsign
-          params.set('senderCallsign', queryCallsign.toUpperCase());
-        } else if (filters.callsign.receiverOnly) {
-          // Show signals received BY this callsign
-          params.set('receiverCallsign', queryCallsign.toUpperCase());
-        } else {
-          // Default: show signals received BY this callsign (PSK Reporter standard)
-          params.set('receiverCallsign', queryCallsign.toUpperCase());
-        }
+        // ALWAYS query for signals received BY this callsign (standard PSK Reporter usage)
+        // The transmitter/receiver filters will be applied client-side during rendering
+        params.set('receiverCallsign', queryCallsign.toUpperCase());
 
         const url = `https://retrieve.pskreporter.info/query?${params.toString()}`;
 
@@ -565,23 +557,31 @@ export class PSKReporterJSONP {
     return conditions;
   }
 
+  // Update filters without triggering immediate refresh
+  updateFilters(filters: FilterSettings): void {
+    // CRITICAL FIX: Clear stale data if callsign OR filter options changed
+    if (this.currentFilters &&
+        (this.currentFilters.callsign.search !== filters.callsign.search ||
+         this.currentFilters.callsign.transmitterOnly !== filters.callsign.transmitterOnly ||
+         this.currentFilters.callsign.receiverOnly !== filters.callsign.receiverOnly ||
+         this.currentFilters.callsign.exactMatch !== filters.callsign.exactMatch)) {
+      console.log('🗑️ Clearing cached data due to filter change');
+      this.currentSpots = [];
+      this.lastSyncTime = null;
+    }
+
+    // Store current filters for next sync cycle
+    this.currentFilters = filters;
+    console.log('📝 Updated filters for next sync cycle');
+  }
+
   // Main refresh method
   async refreshData(filters: FilterSettings): Promise<void> {
     try {
       const filterCallsign = filters.callsign.search.trim();
 
-      // CRITICAL FIX: Clear stale data if callsign OR filter options changed
-      if (this.currentFilters &&
-          (this.currentFilters.callsign.search !== filters.callsign.search ||
-           this.currentFilters.callsign.transmitterOnly !== filters.callsign.transmitterOnly ||
-           this.currentFilters.callsign.receiverOnly !== filters.callsign.receiverOnly ||
-           this.currentFilters.callsign.exactMatch !== filters.callsign.exactMatch)) {
-        this.currentSpots = [];
-        this.lastSyncTime = null;
-      }
-
-      // Store current filters for sync cycles
-      this.currentFilters = filters;
+      // Update filters (this will clear cache if needed)
+      this.updateFilters(filters);
 
       // CRITICAL FIX: Load persisted data for the filter callsign, not user callsign
       if (filterCallsign) {

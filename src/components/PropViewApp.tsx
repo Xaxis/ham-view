@@ -87,7 +87,7 @@ const defaultFilters: FilterSettings = {
   callsign: {
     search: '',
     transmitterOnly: false,
-    receiverOnly: false,
+    receiverOnly: true, // DEFAULT: Show signals received by the callsign
     exactMatch: false,
   },
   geographic: {
@@ -105,6 +105,19 @@ const defaultFilters: FilterSettings = {
   },
 };
 
+// Load saved data immediately to avoid default state issues
+const loadInitialData = () => {
+  const savedFilters = loadFilterSettings();
+  const savedPreferences = loadUserPreferences();
+
+  return {
+    filters: savedFilters || defaultFilters,
+    preferences: savedPreferences || defaultPreferences,
+  };
+};
+
+const initialData = loadInitialData();
+
 // Initial application state
 const initialState: AppState = {
   isLoading: false,
@@ -113,8 +126,8 @@ const initialState: AppState = {
   spots: [],
   solarData: null,
   bandConditions: [],
-  filters: defaultFilters,
-  preferences: defaultPreferences,
+  filters: initialData.filters,
+  preferences: initialData.preferences,
   selectedSpot: null,
   syncStatus: {
     lastSync: null,
@@ -206,18 +219,6 @@ export default function PropViewApp() {
 
   // Initialize app - load saved data and check for first-time user
   useEffect(() => {
-    // Load saved preferences
-    const savedPreferences = loadUserPreferences();
-    if (savedPreferences) {
-      setState(prev => ({ ...prev, preferences: savedPreferences }));
-    }
-
-    // Load saved filters
-    const savedFilters = loadFilterSettings();
-    if (savedFilters) {
-      setState(prev => ({ ...prev, filters: savedFilters }));
-    }
-
     // Load saved QTH location
     const savedQTH = loadQTHLocation();
     if (savedQTH) {
@@ -259,7 +260,6 @@ export default function PropViewApp() {
 
   // Load data on app startup - CLEAN VERSION
   useEffect(() => {
-    console.log('🚀 App startup - loading data...');
     handleRefresh();
   }, []); // Only run once on startup
 
@@ -268,10 +268,13 @@ export default function PropViewApp() {
     saveFilterSettings(state.filters);
   }, [state.filters]);
 
-  // Refresh data when filters change (only for filters that affect API calls)
+  // Update filters for next sync cycle (don't trigger immediate refresh)
   useEffect(() => {
-    handleRefresh();
-  }, [state.filters.bands, state.filters.modes, state.filters.callsign, state.filters.timeRange]);
+    // Only clear cached data and update filters for next sync - don't refresh immediately
+    if (pskReporterJSONP) {
+      pskReporterJSONP.updateFilters(state.filters);
+    }
+  }, [state.filters.callsign, state.filters.timeRange]);
 
   // Save map layers when they change
   useEffect(() => {
@@ -315,10 +318,7 @@ export default function PropViewApp() {
     setMapSplitRatio(state.preferences.displaySettings.mapSplitRatio);
   }, [state.preferences.displaySettings.mapSplitRatio]);
 
-  // Save preferences to localStorage when they change
-  useEffect(() => {
-    localStorage.setItem('propview-preferences', JSON.stringify(state.preferences));
-  }, [state.preferences]);
+
 
   // Apply theme to document
   useEffect(() => {
@@ -337,6 +337,8 @@ export default function PropViewApp() {
       filters: { ...prev.filters, ...newFilters },
     }));
   }, []);
+
+
 
   // Apply filters to spots for display (CLIENT-SIDE FILTERING LIKE PSK REPORTER)
   const filteredSpots = useMemo(() => {
@@ -434,6 +436,70 @@ export default function PropViewApp() {
           case 'poor': return snr >= -20;
           default: return true;
         }
+      });
+    }
+
+    // Apply advanced filters
+    if (state.filters.advanced.uniqueOnly) {
+      // Remove duplicate paths (same transmitter-receiver pair)
+      const uniquePaths = new Map();
+      filtered = filtered.filter(spot => {
+        const pathKey = `${spot.transmitter.callsign}-${spot.receiver.callsign}`;
+        if (!uniquePaths.has(pathKey)) {
+          uniquePaths.set(pathKey, spot);
+          return true;
+        }
+        return false;
+      });
+    }
+
+    if (state.filters.advanced.bidirectionalOnly) {
+      // Only show spots where both directions exist (A->B and B->A)
+      const pathMap = new Map();
+      filtered.forEach(spot => {
+        const forwardKey = `${spot.transmitter.callsign}-${spot.receiver.callsign}`;
+        const reverseKey = `${spot.receiver.callsign}-${spot.transmitter.callsign}`;
+
+        if (!pathMap.has(forwardKey)) pathMap.set(forwardKey, []);
+        pathMap.get(forwardKey).push(spot);
+      });
+
+      filtered = filtered.filter(spot => {
+        const forwardKey = `${spot.transmitter.callsign}-${spot.receiver.callsign}`;
+        const reverseKey = `${spot.receiver.callsign}-${spot.transmitter.callsign}`;
+        return pathMap.has(forwardKey) && pathMap.has(reverseKey);
+      });
+    }
+
+    // Apply minimum spot count filter (per station)
+    if (state.filters.advanced.minSpotCount > 1) {
+      const stationCounts = new Map();
+      filtered.forEach(spot => {
+        const txKey = spot.transmitter.callsign;
+        const rxKey = spot.receiver.callsign;
+        stationCounts.set(txKey, (stationCounts.get(txKey) || 0) + 1);
+        stationCounts.set(rxKey, (stationCounts.get(rxKey) || 0) + 1);
+      });
+
+      filtered = filtered.filter(spot => {
+        const txCount = stationCounts.get(spot.transmitter.callsign) || 0;
+        const rxCount = stationCounts.get(spot.receiver.callsign) || 0;
+        return txCount >= state.filters.advanced.minSpotCount ||
+               rxCount >= state.filters.advanced.minSpotCount;
+      });
+    }
+
+    // Apply distance filters
+    if (state.filters.geographic.minDistance || state.filters.geographic.maxDistance) {
+      filtered = filtered.filter(spot => {
+        const distance = spot.distance || 0;
+        if (state.filters.geographic.minDistance && distance < state.filters.geographic.minDistance) {
+          return false;
+        }
+        if (state.filters.geographic.maxDistance && distance > state.filters.geographic.maxDistance) {
+          return false;
+        }
+        return true;
       });
     }
 
@@ -866,14 +932,6 @@ export default function PropViewApp() {
               <div className="map-controls">
                 <button
                   className="control-btn"
-                  title="Refresh Data"
-                  onClick={handleRefresh}
-                  disabled={state.isLoading}
-                >
-                  🔄
-                </button>
-                <button
-                  className="control-btn"
                   title="Map Layers"
                   onClick={() => setShowMapLayers(true)}
                 >
@@ -892,6 +950,7 @@ export default function PropViewApp() {
                 layers={mapLayers}
                 kIndex={state.solarData?.kIndex || 3}
                 mapZoom={1} // TODO: Get actual map zoom level
+                qthLocation={qthLocation}
               />
             </div>
           </div>

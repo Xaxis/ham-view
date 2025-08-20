@@ -5,7 +5,7 @@ interface BandConditionsPanelProps {
   spots: PropagationSpot[];
 }
 
-export default function BandConditionsPanel({ spots }: BandConditionsPanelProps) {
+const BandConditionsPanel = React.memo(function BandConditionsPanel({ spots }: BandConditionsPanelProps) {
   // Analyze real propagation data to determine band conditions
   const bandAnalysis = useMemo(() => {
     if (spots.length === 0) return [];
@@ -264,4 +264,6 @@ export default function BandConditionsPanel({ spots }: BandConditionsPanelProps)
       </div>
     </div>
   );
-}
+});
+
+export default BandConditionsPanel;

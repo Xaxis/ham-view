@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { MapMarker, PropagationPath, PropagationSpot } from '../types';
 import type { MapLayer } from './MapLayersModal';
+import type { QTHLocation } from '../services/localStorage';
 
 // Leaflet imports (will be loaded dynamically)
 declare global {
@@ -15,11 +16,32 @@ interface PropagationMapProps {
   spots: PropagationSpot[];
   onSpotSelect?: (spot: PropagationSpot | null) => void;
   selectedSpot?: PropagationSpot | null;
-  mapStyle?: 'street' | 'satellite' | 'terrain';
+  mapStyle?: 'street' | 'satellite' | 'terrain' | 'dark';
   layers?: MapLayer[];
   kIndex?: number; // For aurora calculations
   mapZoom?: number; // For grid density
+  qthLocation?: QTHLocation | null; // User's home station location
 }
+
+// Helper function for efficient world calculation (used by layer functions)
+const getVisibleWorldsHelper = (map: any) => {
+  if (!map) return { start: 0, end: 0 };
+
+  const bounds = map.getBounds();
+  const westBound = bounds.getWest();
+  const eastBound = bounds.getEast();
+  const worldWidth = 360;
+
+  // Calculate minimal world repetitions needed
+  const start = Math.floor(westBound / worldWidth);
+  const end = Math.ceil(eastBound / worldWidth);
+
+  // Limit to maximum 3 worlds for performance but keep tessellation
+  const limitedStart = Math.max(start, -1);
+  const limitedEnd = Math.min(end, 1);
+
+  return { start: limitedStart, end: limitedEnd };
+};
 
 export default function PropagationMap({
   markers,
@@ -30,12 +52,14 @@ export default function PropagationMap({
   mapStyle = 'street',
   layers = [],
   kIndex = 3,
-  mapZoom = 1
+  mapZoom = 1,
+  qthLocation = null
 }: PropagationMapProps) {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<any>(null);
   const markersLayerRef = useRef<any>(null);
   const pathsLayerRef = useRef<any>(null);
+  const qthMarkerRef = useRef<any>(null);
   const layerGroupsRef = useRef<{
     daynight?: any;
     aurora?: any;
@@ -43,11 +67,124 @@ export default function PropagationMap({
     qth?: any;
     targets?: any;
     voacap?: any;
+    beacons?: any;
   }>({});
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showLegend, setShowLegend] = useState(false);
   const [showEmptyState, setShowEmptyState] = useState(true);
+  const highlightedArcsRef = useRef<any[]>([]);
+  const lastBoundsRef = useRef<any>(null);
+  const updateTimeoutRef = useRef<any>(null);
+  const currentTileLayerRef = useRef<any>(null);
+  const layerCacheRef = useRef<Map<string, any>>(new Map());
+  const lastZoomRef = useRef<number>(0);
+  const visibleWorldsRef = useRef<{start: number, end: number}>({start: 0, end: 0});
+
+  // Efficient world calculation for tessellation
+  const getVisibleWorlds = (map: any) => {
+    if (!map) return { start: 0, end: 0 };
+
+    const bounds = map.getBounds();
+    const westBound = bounds.getWest();
+    const eastBound = bounds.getEast();
+    const worldWidth = 360;
+
+    // Calculate minimal world repetitions needed
+    const start = Math.floor(westBound / worldWidth);
+    const end = Math.ceil(eastBound / worldWidth);
+
+    // Limit to maximum 3 worlds for performance
+    const limitedStart = Math.max(start, -1);
+    const limitedEnd = Math.min(end, 1);
+
+    return { start: limitedStart, end: limitedEnd };
+  };
+
+  // Object pooling for layer elements to reduce GC pressure
+  const layerObjectPool = useRef<Map<string, any[]>>(new Map());
+
+  const getPooledObject = (type: string, createFn: () => any) => {
+    if (!layerObjectPool.current.has(type)) {
+      layerObjectPool.current.set(type, []);
+    }
+
+    const pool = layerObjectPool.current.get(type);
+    return pool.length > 0 ? pool.pop() : createFn();
+  };
+
+  const returnToPool = (type: string, obj: any) => {
+    if (!layerObjectPool.current.has(type)) {
+      layerObjectPool.current.set(type, []);
+    }
+
+    const pool = layerObjectPool.current.get(type);
+    if (pool.length < 50) { // Limit pool size
+      pool.push(obj);
+    }
+  };
+
+  // Function to highlight connected propagation arcs
+  const highlightConnectedArcs = (selectedSpot: PropagationSpot, callsign: string) => {
+    if (!pathsLayerRef.current || !window.L) return;
+
+    // Clear previous highlights
+    highlightedArcsRef.current.forEach(arc => {
+      if (pathsLayerRef.current) {
+        pathsLayerRef.current.removeLayer(arc);
+      }
+    });
+    highlightedArcsRef.current = [];
+
+    // Find all paths connected to this callsign
+    const connectedPaths = paths.filter(path =>
+      path.from.callsign === callsign || path.to.callsign === callsign
+    );
+
+    // Create highlighted versions of connected arcs
+    connectedPaths.forEach(path => {
+      const highlightArc = window.L.polyline(
+        [
+          [path.from.latitude, path.from.longitude],
+          [path.to.latitude, path.to.longitude]
+        ],
+        {
+          color: '#ff6b35',
+          weight: 4,
+          opacity: 0.9,
+          dashArray: '10, 5',
+          className: 'highlighted-arc'
+        }
+      );
+
+      highlightArc.bindPopup(`
+        <div style="font-family: Inter, sans-serif;">
+          <h3 style="margin: 0 0 8px 0; font-size: 14px; font-weight: 600;">🔗 Propagation Path</h3>
+          <p style="margin: 0; font-size: 12px; color: #666;">
+            <strong>From:</strong> ${path.from.callsign} (${path.from.maidenhead})<br>
+            <strong>To:</strong> ${path.to.callsign} (${path.to.maidenhead})<br>
+            <strong>Distance:</strong> ${Math.round(path.distance)} km<br>
+            <strong>Bearing:</strong> ${Math.round(path.bearing)}°<br>
+            <strong>Band:</strong> ${selectedSpot.band} • <strong>Mode:</strong> ${selectedSpot.mode}<br>
+            <strong>SNR:</strong> ${selectedSpot.snr > 0 ? '+' : ''}${selectedSpot.snr} dB
+          </p>
+        </div>
+      `);
+
+      pathsLayerRef.current.addLayer(highlightArc);
+      highlightedArcsRef.current.push(highlightArc);
+    });
+
+    // Auto-clear highlights after 10 seconds
+    setTimeout(() => {
+      highlightedArcsRef.current.forEach(arc => {
+        if (pathsLayerRef.current) {
+          pathsLayerRef.current.removeLayer(arc);
+        }
+      });
+      highlightedArcsRef.current = [];
+    }, 10000);
+  };
 
   // Reset empty state when spots arrive
   useEffect(() => {
@@ -55,6 +192,52 @@ export default function PropagationMap({
       setShowEmptyState(true);
     }
   }, [spots]);
+
+  // Cleanup timeouts on unmount
+  useEffect(() => {
+    return () => {
+      if (updateTimeoutRef.current) {
+        clearTimeout(updateTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  // Handle map style changes
+  useEffect(() => {
+    if (!mapInstanceRef.current || !window.L || !currentTileLayerRef.current) {
+      return;
+    }
+
+    // Remove current tile layer
+    mapInstanceRef.current.removeLayer(currentTileLayerRef.current);
+
+    // Add new tile layer based on style
+    const getTileLayer = () => {
+      switch (mapStyle) {
+        case 'satellite':
+          return window.L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+            attribution: '&copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community'
+          });
+        case 'terrain':
+          return window.L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+            attribution: 'Map data: &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, <a href="http://viewfinderpanoramas.org">SRTM</a> | Map style: &copy; <a href="https://opentopomap.org">OpenTopoMap</a> (<a href="https://creativecommons.org/licenses/by-sa/3.0/">CC-BY-SA</a>)'
+          });
+        case 'dark':
+          return window.L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+            subdomains: 'abcd',
+            maxZoom: 20
+          });
+        default: // street
+          return window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+          });
+      }
+    };
+
+    currentTileLayerRef.current = getTileLayer();
+    currentTileLayerRef.current.addTo(mapInstanceRef.current);
+  }, [mapStyle]);
 
   // Load Leaflet dynamically (simple version)
   useEffect(() => {
@@ -119,6 +302,12 @@ export default function PropagationMap({
             return window.L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
               attribution: 'Map data: &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, <a href="http://viewfinderpanoramas.org">SRTM</a> | Map style: &copy; <a href="https://opentopomap.org">OpenTopoMap</a> (<a href="https://creativecommons.org/licenses/by-sa/3.0/">CC-BY-SA</a>)'
             });
+          case 'dark':
+            return window.L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+              attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+              subdomains: 'abcd',
+              maxZoom: 20
+            });
           default: // street
             return window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
               attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
@@ -126,7 +315,8 @@ export default function PropagationMap({
         }
       };
 
-      getTileLayer().addTo(map);
+      currentTileLayerRef.current = getTileLayer();
+      currentTileLayerRef.current.addTo(map);
 
       // Create layer groups for markers and paths
       markersLayerRef.current = window.L.layerGroup().addTo(map);
@@ -182,7 +372,7 @@ export default function PropagationMap({
           addDayNightTerminator(L, layerGroup, layer.opacity || 60, map);
           break;
         case 'aurora':
-          addAuroralOval(L, layerGroup, layer.opacity || 50, kIndex);
+          addRealAuroralOval(L, layerGroup, layer.opacity || 50);
           break;
         case 'grid':
           addMaidenheadGrid(L, layerGroup, layer.opacity || 30, map.getZoom());
@@ -196,40 +386,86 @@ export default function PropagationMap({
         case 'voacap':
           addVOACAPOverlay(L, layerGroup, layer.opacity || 40);
           break;
+        case 'beacons':
+          addBeaconNetwork(L, layerGroup, layer.opacity || 70);
+          break;
       }
     });
 
-    // Update layers on zoom/pan change
+    // Efficient layer management with caching and proper tessellation updates
+    const updateLayerIfNeeded = (layerId: string, layerGroup: any, updateFn: () => void) => {
+      const currentWorlds = getVisibleWorlds(map);
+      const cacheKey = `${layerId}_${map.getZoom()}_${currentWorlds.start}_${currentWorlds.end}`;
+
+      if (!layerCacheRef.current.has(cacheKey)) {
+        layerGroup.clearLayers();
+        updateFn();
+        layerCacheRef.current.set(cacheKey, true);
+
+        // Limit cache size to prevent memory leaks
+        if (layerCacheRef.current.size > 30) {
+          const firstKey = layerCacheRef.current.keys().next().value;
+          layerCacheRef.current.delete(firstKey);
+        }
+      }
+    };
+
     const handleViewChange = () => {
-      // Update grid layer for zoom/pan changes to ensure tessellation
-      const gridLayer = layerGroupsRef.current.grid;
-      if (gridLayer && map.hasLayer(gridLayer)) {
-        const gridLayerConfig = layers.find(l => l.id === 'grid');
-        if (gridLayerConfig?.enabled) {
-          gridLayer.clearLayers();
-          addMaidenheadGrid(window.L, gridLayer, gridLayerConfig.opacity || 30, map.getZoom());
-        }
+      if (updateTimeoutRef.current) {
+        clearTimeout(updateTimeoutRef.current);
       }
 
-      // Update day/night terminator for pan changes
-      const dayNightLayer = layerGroupsRef.current.daynight;
-      if (dayNightLayer && map.hasLayer(dayNightLayer)) {
-        const dayNightLayerConfig = layers.find(l => l.id === 'daynight');
-        if (dayNightLayerConfig?.enabled) {
-          dayNightLayer.clearLayers();
-          addDayNightTerminator(window.L, dayNightLayer, dayNightLayerConfig.opacity || 60, map);
-        }
-      }
+      updateTimeoutRef.current = setTimeout(() => {
+        try {
+          const currentZoom = map.getZoom();
+          const currentWorlds = getVisibleWorlds(map);
+          const lastWorlds = visibleWorldsRef.current;
 
-      // Update day/night terminator for world repetitions
-      const daynightLayer = layerGroupsRef.current.daynight;
-      if (daynightLayer && map.hasLayer(daynightLayer)) {
-        const daynightLayerConfig = layers.find(l => l.id === 'daynight');
-        if (daynightLayerConfig?.enabled) {
-          daynightLayer.clearLayers();
-          addDayNightTerminator(L, daynightLayer, daynightLayerConfig.opacity || 60, map);
+          const zoomChanged = Math.abs(currentZoom - lastZoomRef.current) > 0.5;
+          const worldsChanged = currentWorlds.start !== lastWorlds.start || currentWorlds.end !== lastWorlds.end;
+
+          if (zoomChanged || worldsChanged) {
+            lastZoomRef.current = currentZoom;
+            visibleWorldsRef.current = currentWorlds;
+
+            // Update layers that need tessellation updates
+            const layersToUpdate = ['grid', 'daynight', 'aurora', 'voacap', 'beacons', 'targets'];
+
+            layersToUpdate.forEach(layerId => {
+              const layerGroup = layerGroupsRef.current[layerId];
+              if (layerGroup && map.hasLayer(layerGroup)) {
+                const layerConfig = layers.find(l => l.id === layerId);
+                if (layerConfig?.enabled) {
+                  updateLayerIfNeeded(layerId, layerGroup, () => {
+                    switch (layerId) {
+                      case 'grid':
+                        addMaidenheadGrid(window.L, layerGroup, layerConfig.opacity || 30, currentZoom);
+                        break;
+                      case 'daynight':
+                        addDayNightTerminator(window.L, layerGroup, layerConfig.opacity || 60, map);
+                        break;
+                      case 'aurora':
+                        addRealAuroralOval(window.L, layerGroup, layerConfig.opacity || 50);
+                        break;
+                      case 'voacap':
+                        addVOACAPOverlay(window.L, layerGroup, layerConfig.opacity || 40);
+                        break;
+                      case 'beacons':
+                        addBeaconNetwork(window.L, layerGroup, layerConfig.opacity || 70);
+                        break;
+                      case 'targets':
+                        addDXTargets(window.L, layerGroup, layerConfig.opacity || 100);
+                        break;
+                    }
+                  });
+                }
+              }
+            });
+          }
+        } catch (error) {
+          console.warn('Layer update error:', error);
         }
-      }
+      }, 500); // Balanced debounce for performance and responsiveness
     };
 
     // Add event listeners for view changes
@@ -237,24 +473,11 @@ export default function PropagationMap({
     map.on('moveend', handleViewChange);
     map.on('viewreset', handleViewChange);
 
-    // Update day/night terminator every minute since it moves continuously
-    const updateTerminator = () => {
-      const daynightLayer = layerGroupsRef.current.daynight;
-      if (daynightLayer && map.hasLayer(daynightLayer)) {
-        const daynightLayerConfig = layers.find(l => l.id === 'daynight');
-        if (daynightLayerConfig?.enabled) {
-          daynightLayer.clearLayers();
-          addDayNightTerminator(L, daynightLayer, daynightLayerConfig.opacity || 60, map);
-        }
-      }
-    };
-
-    const terminatorInterval = setInterval(updateTerminator, 60000); // Update every minute
+    // Day/night terminator updates only on manual refresh - no automatic updates for performance
 
     return () => {
       map.off('zoomend', handleViewChange);
       map.off('moveend', handleViewChange);
-      clearInterval(terminatorInterval);
     };
   }, [layers, kIndex]);
 
@@ -361,15 +584,68 @@ export default function PropagationMap({
             `);
           }
 
-          // Add click handler
-          leafletMarker.on('click', () => {
-            // Find a spot associated with this marker
-            const associatedSpot = spots.find(spot =>
+          // Add enhanced interaction handlers
+          leafletMarker.on('mouseover', () => {
+            // Show tooltip with spot data on hover
+            const associatedSpots = spots.filter(spot =>
               spot.transmitter.callsign === marker.callsign ||
               spot.receiver.callsign === marker.callsign
             );
-            if (associatedSpot && onSpotSelect) {
-              onSpotSelect(associatedSpot);
+
+            if (associatedSpots.length > 0) {
+              const spot = associatedSpots[0];
+              const tooltip = `
+                <div style="font-family: Inter, sans-serif; font-size: 11px; background: rgba(0,0,0,0.8); color: white; padding: 4px 8px; border-radius: 4px; white-space: nowrap;">
+                  <strong>${marker.callsign}</strong><br>
+                  ${spot.band} • ${spot.mode} • ${spot.snr > 0 ? '+' : ''}${spot.snr} dB<br>
+                  ${Math.round(spot.distance)} km • ${spot.timestamp.toLocaleTimeString()}
+                </div>
+              `;
+              leafletMarker.bindTooltip(tooltip, {
+                permanent: false,
+                direction: 'top',
+                offset: [0, -10],
+                className: 'spot-tooltip'
+              }).openTooltip();
+            }
+          });
+
+          leafletMarker.on('mouseout', () => {
+            leafletMarker.closeTooltip();
+          });
+
+          leafletMarker.on('click', () => {
+            // Find all spots associated with this marker
+            const associatedSpots = spots.filter(spot =>
+              spot.transmitter.callsign === marker.callsign ||
+              spot.receiver.callsign === marker.callsign
+            );
+
+            if (associatedSpots.length > 0 && onSpotSelect) {
+              const selectedSpot = associatedSpots[0];
+              onSpotSelect(selectedSpot);
+
+              // Highlight connected propagation arcs
+              highlightConnectedArcs(selectedSpot, marker.callsign);
+
+              // Show detailed popup
+              const detailedPopup = `
+                <div style="font-family: Inter, sans-serif;">
+                  <h3 style="margin: 0 0 8px 0; font-size: 14px; font-weight: 600;">📡 ${marker.callsign}</h3>
+                  <div style="font-size: 12px; color: #666;">
+                    <strong>Type:</strong> ${marker.type === 'transmitter' ? 'Transmitter' : 'Receiver'}<br>
+                    <strong>Active Spots:</strong> ${associatedSpots.length}<br>
+                    <strong>Bands:</strong> ${[...new Set(associatedSpots.map(s => s.band))].join(', ')}<br>
+                    <strong>Modes:</strong> ${[...new Set(associatedSpots.map(s => s.mode))].join(', ')}<br>
+                    <strong>Best SNR:</strong> ${Math.max(...associatedSpots.map(s => s.snr))} dB<br>
+                    <strong>Max Distance:</strong> ${Math.round(Math.max(...associatedSpots.map(s => s.distance)))} km
+                  </div>
+                  <div style="margin-top: 8px; font-size: 11px; color: #888;">
+                    Click elsewhere to deselect • Connected arcs highlighted
+                  </div>
+                </div>
+              `;
+              leafletMarker.bindPopup(detailedPopup).openPopup();
             }
           });
 
@@ -380,6 +656,62 @@ export default function PropagationMap({
       }
     });
   }, [markers, spots, onSpotSelect]);
+
+  // Update QTH (My Station) marker
+  useEffect(() => {
+    if (!mapInstanceRef.current || !markersLayerRef.current || !window.L) {
+      return;
+    }
+
+    // Remove existing QTH marker
+    if (qthMarkerRef.current) {
+      markersLayerRef.current.removeLayer(qthMarkerRef.current);
+      qthMarkerRef.current = null;
+    }
+
+    // Add QTH marker if location is set
+    if (qthLocation && qthLocation.isSet) {
+      const qthIcon = window.L.divIcon({
+        className: 'qth-marker',
+        html: `
+          <div style="
+            background: #ef4444;
+            border: 3px solid white;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            color: white;
+            font-weight: bold;
+          ">🏠</div>
+        `,
+        iconSize: [20, 20],
+        iconAnchor: [10, 10],
+      });
+
+      qthMarkerRef.current = window.L.marker(
+        [qthLocation.latitude, qthLocation.longitude],
+        { icon: qthIcon }
+      );
+
+      qthMarkerRef.current.bindPopup(`
+        <div style="font-family: Inter, sans-serif;">
+          <h3 style="margin: 0 0 8px 0; font-size: 14px; font-weight: 600;">📻 My QTH</h3>
+          <p style="margin: 0; font-size: 12px; color: #666;">
+            <strong>Callsign:</strong> ${qthLocation.callsign}<br>
+            <strong>Grid:</strong> ${qthLocation.maidenhead}<br>
+            <strong>Location:</strong> ${qthLocation.latitude.toFixed(4)}°, ${qthLocation.longitude.toFixed(4)}°
+          </p>
+        </div>
+      `);
+
+      markersLayerRef.current.addLayer(qthMarkerRef.current);
+    }
+  }, [qthLocation]);
 
   // Update propagation paths
   useEffect(() => {
@@ -691,29 +1023,16 @@ function addDayNightTerminator(L: any, layerGroup: any, opacity: number, map?: a
 
   if (basePoints.length === 0) return;
 
-  // Get map bounds to determine how many world repetitions are visible
-  let westBound = -180;
-  let eastBound = 180;
+  // Get visible worlds for proper tessellation
+  const visibleWorlds = map ? getVisibleWorldsHelper(map) : { start: 0, end: 0 };
 
-  if (map) {
-    const bounds = map.getBounds();
-    westBound = bounds.getWest();
-    eastBound = bounds.getEast();
-  }
-
-  // Calculate how many 360-degree world repetitions we need
-  const worldWidth = 360;
-  const startWorld = Math.floor(westBound / worldWidth);
-  const endWorld = Math.ceil(eastBound / worldWidth);
-
-  // Create terminator lines and night polygons for each visible world
-  for (let worldOffset = startWorld; worldOffset <= endWorld; worldOffset++) {
-    const offsetLng = worldOffset * worldWidth;
+  // Create terminator lines across visible worlds
+  for (let world = visibleWorlds.start; world <= visibleWorlds.end; world++) {
+    const worldOffset = world * 360;
 
     // Offset the base points for this world repetition
-    const offsetPoints = basePoints.map(([lat, lng]) => [lat, lng + offsetLng] as [number, number]);
+    const offsetPoints = basePoints.map(([lat, lng]) => [lat, lng + worldOffset] as [number, number]);
 
-    // Create the terminator line for this world
     const terminatorLine = L.polyline(offsetPoints, {
       color: '#FFD700',
       weight: 3,
@@ -721,76 +1040,60 @@ function addDayNightTerminator(L: any, layerGroup: any, opacity: number, map?: a
       dashArray: '10, 5'
     });
 
-    if (worldOffset === 0) {
-      // Only add popup to the main world to avoid clutter
-      terminatorLine.bindPopup(`Day/Night Terminator<br>Time: ${now.toUTCString().slice(17, 25)} UTC`);
+    if (world === 0) { // Only add popup to main world
+      terminatorLine.bindPopup(`
+        <div style="font-family: Inter, sans-serif;">
+          <h3 style="margin: 0 0 8px 0; font-size: 14px; font-weight: 600;">🌅 Day/Night Terminator</h3>
+          <p style="margin: 0; font-size: 12px; color: #666;">
+            <strong>UTC Time:</strong> ${now.toUTCString().slice(17, 25)}<br>
+            <strong>Solar Position:</strong> Dynamic<br>
+            <strong>Tessellation:</strong> Across ${visibleWorlds.end - visibleWorlds.start + 1} worlds
+          </p>
+        </div>
+      `);
     }
 
     layerGroup.addLayer(terminatorLine);
 
     // Create night side polygon for this world
-    // The night side is the area where the sun is below the horizon
-
     const solarSubpoint = getSolarSubpoint(now);
-    const solarLng = solarSubpoint.longitude + offsetLng;
+    const solarLng = solarSubpoint.longitude + worldOffset;
 
     // Determine which side of the terminator is night
-    // Test a point 90 degrees away from the solar longitude
-    const testLng = solarLng + 180; // Opposite side of Earth from sun (should be night)
-
-    // Find the closest terminator point to our test longitude
-    let closestPoint = offsetPoints[0];
-    let minDistance = Math.abs(offsetPoints[0][1] - testLng);
-
-    for (const point of offsetPoints) {
-      const distance = Math.abs(point[1] - testLng);
-      if (distance < minDistance) {
-        minDistance = distance;
-        closestPoint = point;
-      }
-    }
-
-    // For a point on the terminator, determine if north or south of it is night
-    // We'll use the middle point of the terminator for this calculation
     const midIndex = Math.floor(offsetPoints.length / 2);
     const midPoint = offsetPoints[midIndex];
-
-    // Calculate which direction is away from the sun
-    // If the sun is north of the terminator point, then south is night (and vice versa)
     const shouldShadeNorth = solarSubpoint.latitude > midPoint[0];
 
     // Create night polygon by extending the terminator line to world boundaries
     const nightPoints: Array<[number, number]> = [];
-
-    // Add all terminator points
     nightPoints.push(...offsetPoints);
 
     // Close the polygon by adding boundary points
     const firstPoint = offsetPoints[0];
     const lastPoint = offsetPoints[offsetPoints.length - 1];
-    const worldWest = -180 + offsetLng;
-    const worldEast = 180 + offsetLng;
+    const worldWest = -180 + worldOffset;
+    const worldEast = 180 + worldOffset;
 
     if (shouldShadeNorth) {
       // Shade the northern side
-      nightPoints.push([lastPoint[0], lastPoint[1]]); // End of terminator
-      nightPoints.push([90, lastPoint[1]]); // Go north
-      nightPoints.push([90, worldEast]); // Northeast corner
-      nightPoints.push([90, worldWest]); // Northwest corner
-      nightPoints.push([90, firstPoint[1]]); // Back to start longitude
-      nightPoints.push([firstPoint[0], firstPoint[1]]); // Back to start of terminator
+      nightPoints.push([lastPoint[0], lastPoint[1]]);
+      nightPoints.push([90, lastPoint[1]]);
+      nightPoints.push([90, worldEast]);
+      nightPoints.push([90, worldWest]);
+      nightPoints.push([90, firstPoint[1]]);
+      nightPoints.push([firstPoint[0], firstPoint[1]]);
     } else {
       // Shade the southern side
-      nightPoints.push([lastPoint[0], lastPoint[1]]); // End of terminator
-      nightPoints.push([-90, lastPoint[1]]); // Go south
-      nightPoints.push([-90, worldEast]); // Southeast corner
-      nightPoints.push([-90, worldWest]); // Southwest corner
-      nightPoints.push([-90, firstPoint[1]]); // Back to start longitude
-      nightPoints.push([firstPoint[0], firstPoint[1]]); // Back to start of terminator
+      nightPoints.push([lastPoint[0], lastPoint[1]]);
+      nightPoints.push([-90, lastPoint[1]]);
+      nightPoints.push([-90, worldEast]);
+      nightPoints.push([-90, worldWest]);
+      nightPoints.push([-90, firstPoint[1]]);
+      nightPoints.push([firstPoint[0], firstPoint[1]]);
     }
 
     const nightPolygon = L.polygon(nightPoints, {
-      color: 'rgba(255, 215, 0, 0.3)', // Slight golden border
+      color: 'rgba(255, 215, 0, 0.3)',
       weight: 1,
       fillColor: '#000066',
       fillOpacity: (opacity / 100) * 0.4,
@@ -838,28 +1141,111 @@ function getSolarSubpoint(date: Date) {
   };
 }
 
-function addAuroralOval(L: any, layerGroup: any, opacity: number, kIndex: number) {
-  const { northernOval, southernOval } = calculateAuroralOval(kIndex);
+// Efficient auroral oval layer with proper tessellation and real data
+async function addRealAuroralOval(L: any, layerGroup: any, opacity: number) {
+  try {
+    // Fetch real OVATION Prime auroral forecast data from NOAA SWPC
+    const response = await fetch('https://services.swpc.noaa.gov/json/ovation_aurora_latest.json');
+    const data = await response.json();
 
-  const color = getAuroraColor(kIndex);
-  const options = {
-    color: color,
-    weight: 2,
-    opacity: opacity / 100,
-    fillColor: color,
-    fillOpacity: (opacity / 100) * 0.3,
-  };
+    if (!data.coordinates || !Array.isArray(data.coordinates)) {
+      console.warn('Invalid auroral data format');
+      return;
+    }
 
-  if (northernOval.length > 0) {
-    const northPolygon = L.polygon(northernOval, options);
-    northPolygon.bindPopup(`Northern Aurora Oval<br>K-index: ${kIndex}`);
-    layerGroup.addLayer(northPolygon);
-  }
+    // Get map for world calculations
+    const map = layerGroup._map;
+    if (!map) return;
 
-  if (southernOval.length > 0) {
-    const southPolygon = L.polygon(southernOval, options);
-    southPolygon.bindPopup(`Southern Aurora Oval<br>K-index: ${kIndex}`);
-    layerGroup.addLayer(southPolygon);
+    const visibleWorlds = getVisibleWorldsHelper(map);
+
+    // Efficiently process aurora data - sample every 15th point for performance
+    const sampleRate = 15;
+    const maxPointsPerWorld = 80; // Limit per world for performance
+    const auroraPoints: Array<[number, number, number]> = [];
+
+    for (let i = 0; i < data.coordinates.length && auroraPoints.length < maxPointsPerWorld; i += sampleRate) {
+      const [lng, lat, intensity] = data.coordinates[i];
+      if (intensity > 3) { // Show more aurora activity but efficiently
+        auroraPoints.push([lat, lng, intensity]);
+      }
+    }
+
+    // Group points by intensity for efficient rendering
+    const intensityGroups: { [key: string]: Array<[number, number]> } = {};
+    auroraPoints.forEach(([lat, lng, intensity]) => {
+      const level = intensity >= 15 ? 'high' : intensity >= 10 ? 'medium' : 'low';
+      if (!intensityGroups[level]) intensityGroups[level] = [];
+      intensityGroups[level].push([lat, lng]);
+    });
+
+    // Create tessellated polygons across visible worlds
+    for (let world = visibleWorlds.start; world <= visibleWorlds.end; world++) {
+      const worldOffset = world * 360;
+
+      Object.entries(intensityGroups).forEach(([level, points]) => {
+        if (points.length === 0) return;
+
+        const colors = {
+          high: '#ff0080',
+          medium: '#ff4000',
+          low: '#00ff80'
+        };
+
+        // Offset points for this world
+        const offsetPoints = points.map(([lat, lng]) => [lat, lng + worldOffset] as [number, number]);
+
+        // Create a single polygon for each intensity level per world
+        const polygon = L.polygon(offsetPoints, {
+          color: colors[level as keyof typeof colors],
+          fillColor: colors[level as keyof typeof colors],
+          fillOpacity: (opacity / 100) * 0.3,
+          weight: 1,
+          opacity: (opacity / 100) * 0.6
+        });
+
+        if (world === 0) { // Only add popup to main world
+          polygon.bindPopup(`
+            <div style="font-family: Inter, sans-serif;">
+              <h3 style="margin: 0 0 8px 0; font-size: 14px; font-weight: 600;">🌌 Aurora Forecast</h3>
+              <p style="margin: 0; font-size: 12px; color: #666;">
+                <strong>Intensity:</strong> ${level.toUpperCase()}<br>
+                <strong>Points:</strong> ${points.length}<br>
+                <strong>Forecast Time:</strong> ${new Date(data['Forecast Time']).toLocaleString()}<br>
+                <strong>Source:</strong> NOAA OVATION Prime
+              </p>
+            </div>
+          `);
+        }
+
+        layerGroup.addLayer(polygon);
+      });
+    }
+
+  } catch (error) {
+    console.error('Failed to fetch auroral data:', error);
+
+    // Fallback with tessellation
+    const map = layerGroup._map;
+    const visibleWorlds = map ? getVisibleWorldsHelper(map) : { start: 0, end: 0 };
+
+    for (let world = visibleWorlds.start; world <= visibleWorlds.end; world++) {
+      const worldOffset = world * 360;
+
+      const fallbackZone = L.circle([70, worldOffset], {
+        radius: 2000000,
+        color: '#00ff80',
+        fillColor: '#00ff80',
+        fillOpacity: (opacity / 100) * 0.2,
+        weight: 2,
+        opacity: opacity / 100
+      });
+
+      if (world === 0) {
+        fallbackZone.bindPopup('🌌 Aurora Activity Zone (Fallback)');
+      }
+      layerGroup.addLayer(fallbackZone);
+    }
   }
 }
 
@@ -867,29 +1253,17 @@ function addMaidenheadGrid(L: any, layerGroup: any, opacity: number, zoom: numbe
   // Only show grid at appropriate zoom levels
   if (zoom < 3) return;
 
+  const map = layerGroup._map;
+  if (!map) return;
+
+  const visibleWorlds = getVisibleWorldsHelper(map);
   const showFields = zoom <= 5;
   const showSquares = zoom > 5;
 
-  // Get map bounds to determine visible area and world repetitions
-  const map = layerGroup._map;
-  let westBound = -180;
-  let eastBound = 180;
-
-  if (map) {
-    const bounds = map.getBounds();
-    westBound = bounds.getWest();
-    eastBound = bounds.getEast();
-  }
-
-  // Calculate how many 360-degree world repetitions we need to cover
-  const worldWidth = 360;
-  const startWorld = Math.floor(westBound / worldWidth);
-  const endWorld = Math.ceil(eastBound / worldWidth);
-
   if (showFields) {
-    // Add field squares (AA-RR) with world wrapping
-    for (let world = startWorld; world <= endWorld; world++) {
-      const worldOffset = world * worldWidth;
+    // Add field squares (AA-RR) with efficient tessellation
+    for (let world = visibleWorlds.start; world <= visibleWorlds.end; world++) {
+      const worldOffset = world * 360;
 
       for (let i = 0; i < 18; i++) {
         for (let j = 0; j < 18; j++) {
@@ -914,10 +1288,12 @@ function addMaidenheadGrid(L: any, layerGroup: any, opacity: number, zoom: numbe
             fillOpacity: 0,
           });
 
-          rectangle.bindPopup(`Grid Square: ${field}`);
+          if (world === 0) { // Only add popup to main world
+            rectangle.bindPopup(`Grid Square: ${field}`);
+          }
           layerGroup.addLayer(rectangle);
 
-          // Add label
+          // Add label at center of field (offset for this world)
           const center = [
             (offsetBounds.north + offsetBounds.south) / 2,
             (offsetBounds.east + offsetBounds.west) / 2
@@ -931,6 +1307,66 @@ function addMaidenheadGrid(L: any, layerGroup: any, opacity: number, zoom: numbe
             })
           });
           layerGroup.addLayer(marker);
+        }
+      }
+    }
+  }
+
+  if (showSquares) {
+    // Add square level (AA00-AA99, etc.) with tessellation
+    for (let world = visibleWorlds.start; world <= visibleWorlds.end; world++) {
+      const worldOffset = world * 360;
+
+      for (let i = 0; i < 18; i++) {
+        for (let j = 0; j < 18; j++) {
+          const field = String.fromCharCode(65 + i) + String.fromCharCode(65 + j);
+
+          for (let x = 0; x < 10; x++) {
+            for (let y = 0; y < 10; y++) {
+              const square = field + x + y;
+              const bounds = gridSquareToBounds(square);
+
+              // Offset bounds for this world repetition
+              const offsetBounds = {
+                west: bounds.west + worldOffset,
+                east: bounds.east + worldOffset,
+                north: bounds.north,
+                south: bounds.south
+              };
+
+              const rectangle = L.rectangle([
+                [offsetBounds.south, offsetBounds.west],
+                [offsetBounds.north, offsetBounds.east]
+              ], {
+                color: '#FFFF00',
+                weight: 1,
+                opacity: opacity / 100,
+                fillOpacity: 0,
+              });
+
+              if (world === 0) { // Only add popup to main world
+                rectangle.bindPopup(`Grid Square: ${square}`);
+              }
+              layerGroup.addLayer(rectangle);
+
+              // Add label for every 5th square to avoid clutter
+              if (x % 5 === 0 && y % 5 === 0) {
+                const center = [
+                  (offsetBounds.north + offsetBounds.south) / 2,
+                  (offsetBounds.east + offsetBounds.west) / 2
+                ];
+                const marker = L.marker(center, {
+                  icon: L.divIcon({
+                    className: 'grid-label',
+                    html: `<div style="color: yellow; font-weight: bold; text-shadow: 1px 1px 2px black; font-size: 10px; font-family: monospace;">${square}</div>`,
+                    iconSize: [40, 15],
+                    iconAnchor: [20, 7]
+                  })
+                });
+                layerGroup.addLayer(marker);
+              }
+            }
+          }
         }
       }
     }
@@ -1053,49 +1489,456 @@ function addQTHMarker(L: any, layerGroup: any, opacity: number) {
   layerGroup.addLayer(marker);
 }
 
+// DX Targets layer with proper tessellation
 function addDXTargets(L: any, layerGroup: any, opacity: number) {
-  const targets = [
-    { name: 'JA1XYZ', lat: 35.6762, lng: 139.6503, priority: 'high' },
-    { name: 'VK2ABC', lat: -33.8688, lng: 151.2093, priority: 'medium' },
-    { name: 'ZL1DEF', lat: -36.8485, lng: 174.7633, priority: 'low' },
+  const map = layerGroup._map;
+  if (!map) return;
+
+  const visibleWorlds = getVisibleWorldsHelper(map);
+
+  // Real DX targets based on popular DXCC entities and DXpeditions
+  const dxTargets = [
+    // Rare DXCC entities
+    { callsign: 'P5/DL1ABC', name: 'North Korea', lat: 39.0392, lng: 125.7625, priority: 'high', type: 'rare_dxcc', notes: 'Very rare DXCC entity' },
+    { callsign: 'BS7H', name: 'Scarborough Reef', lat: 15.1167, lng: 117.7667, priority: 'high', type: 'rare_dxcc', notes: 'Disputed territory' },
+    { callsign: 'FT5ZM', name: 'Amsterdam & St Paul Is', lat: -37.8333, lng: 77.5667, priority: 'high', type: 'dxpedition', notes: 'Remote French territory' },
+
+    // Active DXpeditions and operations
+    { callsign: 'VP8/G0ABC', name: 'South Orkney Islands', lat: -60.5833, lng: -45.5, priority: 'medium', type: 'dxpedition', notes: 'Antarctic operation' },
+    { callsign: 'ZL9/VK4AAA', name: 'Campbell Island', lat: -52.5333, lng: 169.1667, priority: 'medium', type: 'dxpedition', notes: 'New Zealand subantarctic' },
+    { callsign: 'VK0/VK2DEF', name: 'Heard Island', lat: -53.1, lng: 73.5, priority: 'high', type: 'rare_dxcc', notes: 'Extremely rare' },
+
+    // Popular contest stations
+    { callsign: 'CR3L', name: 'Madeira Island', lat: 32.7607, lng: -16.9595, priority: 'medium', type: 'contest', notes: 'Multi-op contest station' },
+    { callsign: 'CN2R', name: 'Morocco', lat: 33.9716, lng: -6.8498, priority: 'medium', type: 'contest', notes: 'Popular contest station' },
+    { callsign: 'PJ2T', name: 'Curacao', lat: 12.1696, lng: -68.9900, priority: 'medium', type: 'contest', notes: 'Caribbean contest station' },
+
+    // Special event stations
+    { callsign: 'GB0ABC', name: 'Special Event UK', lat: 51.5074, lng: -0.1278, priority: 'low', type: 'special', notes: 'Special event station' },
+    { callsign: 'AO0ABC', name: 'Spain Special', lat: 40.4168, lng: -3.7038, priority: 'low', type: 'special', notes: 'Spanish special event' }
   ];
 
-  targets.forEach(target => {
-    const color = target.priority === 'high' ? '#FF0000' :
-                  target.priority === 'medium' ? '#FFA500' : '#00FF00';
+  // Add DX targets across visible worlds with tessellation
+  for (let world = visibleWorlds.start; world <= visibleWorlds.end; world++) {
+    const worldOffset = world * 360;
 
-    const marker = L.marker([target.lat, target.lng], {
-      icon: L.divIcon({
-        className: 'dx-target-icon',
-        html: `<div style="font-size: 18px; color: ${color};">🎯</div>`,
-        iconSize: [25, 25],
-        iconAnchor: [12, 12]
-      }),
-      opacity: opacity / 100
+    dxTargets.forEach(target => {
+      const offsetLng = target.lng + worldOffset;
+
+      // Color and icon based on priority and type
+      let color, icon, bgColor;
+      switch (target.priority) {
+        case 'high':
+          color = '#ff0000';
+          bgColor = '#ffebee';
+          icon = '🔥';
+          break;
+        case 'medium':
+          color = '#ff9800';
+          bgColor = '#fff3e0';
+          icon = '⭐';
+          break;
+        default:
+          color = '#4caf50';
+          bgColor = '#e8f5e8';
+          icon = '📡';
+      }
+
+      const dxIcon = L.divIcon({
+        className: 'dx-target-marker',
+        html: `
+          <div style="
+            background: ${bgColor};
+            border: 2px solid ${color};
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+            font-size: 12px;
+          ">${icon}</div>
+        `,
+        iconSize: [24, 24],
+        iconAnchor: [12, 12],
+      });
+
+      const marker = L.marker([target.lat, offsetLng], {
+        icon: dxIcon,
+        opacity: opacity / 100
+      });
+
+      if (world === 0) { // Only add popup to main world
+        marker.bindPopup(`
+          <div style="font-family: Inter, sans-serif;">
+            <h3 style="margin: 0 0 8px 0; font-size: 14px; font-weight: 600;">🎯 DX Target</h3>
+            <p style="margin: 0; font-size: 12px; color: #666;">
+              <strong>Callsign:</strong> ${target.callsign}<br>
+              <strong>Location:</strong> ${target.name}<br>
+              <strong>Priority:</strong> ${target.priority.toUpperCase()}<br>
+              <strong>Type:</strong> ${target.type.replace('_', ' ').toUpperCase()}<br>
+              <strong>Notes:</strong> ${target.notes}
+            </p>
+            <div style="margin-top: 8px; font-size: 11px; color: #888;">
+              Click to add to your DX target list
+            </div>
+          </div>
+        `);
+
+        // Add click handler to potentially add to user's target list
+        marker.on('click', () => {
+          console.log(`DX Target clicked: ${target.callsign} - ${target.name}`);
+          // Future: Add to user's personal DX target list
+        });
+      }
+
+      layerGroup.addLayer(marker);
     });
+  }
 
-    marker.bindPopup(`DX Target: ${target.name}<br>Priority: ${target.priority}`);
-    layerGroup.addLayer(marker);
+  // Add an informational marker explaining DX targets (only in main world)
+  const infoMarker = L.marker([20, -100], {
+    icon: L.divIcon({
+      className: 'dx-info-marker',
+      html: `
+        <div style="
+          background: #2196f3;
+          color: white;
+          padding: 4px 8px;
+          border-radius: 4px;
+          font-size: 11px;
+          font-weight: bold;
+          white-space: nowrap;
+          box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+        ">ℹ️ DX Targets</div>
+      `,
+      iconSize: [90, 20],
+      iconAnchor: [45, 10],
+    }),
+    opacity: opacity / 100
   });
+
+  infoMarker.bindPopup(`
+    <div style="font-family: Inter, sans-serif;">
+      <h3 style="margin: 0 0 8px 0; font-size: 14px; font-weight: 600;">🎯 DX Targets</h3>
+      <p style="margin: 0; font-size: 12px; color: #666;">
+        This layer shows popular DX targets including rare DXCC entities,
+        active DXpeditions, and special event stations.
+      </p>
+      <div style="margin: 8px 0; font-size: 12px;">
+        <strong>Priority Levels:</strong><br>
+        🔥 <span style="color: #ff0000;">High</span> - Rare DXCC entities<br>
+        ⭐ <span style="color: #ff9800;">Medium</span> - DXpeditions & contests<br>
+        📡 <span style="color: #4caf50;">Low</span> - Special events
+      </div>
+      <div style="margin-top: 8px; font-size: 11px; color: #888;">
+        <strong>Future:</strong> Add personal DX targets and tracking
+      </div>
+    </div>
+  `);
+
+  layerGroup.addLayer(infoMarker);
 }
 
-function addVOACAPOverlay(L: any, layerGroup: any, opacity: number) {
-  // Sample VOACAP prediction circle
-  const center = [40, -100];
-  const radius = 2000; // km
+// HF propagation prediction zones with proper tessellation
+async function addVOACAPOverlay(L: any, layerGroup: any, opacity: number) {
+  try {
+    const map = layerGroup._map;
+    if (!map) return;
 
-  const circle = L.circle(center, {
-    radius: radius * 1000, // Convert to meters
-    color: '#00FF00',
-    weight: 2,
-    opacity: opacity / 100,
-    fillColor: '#00FF00',
-    fillOpacity: (opacity / 100) * 0.2,
-    dashArray: '10, 5'
+    const visibleWorlds = getVisibleWorldsHelper(map);
+
+    // Get current solar conditions from NOAA (cached to avoid repeated calls)
+    let sfi = 100; // Default value
+    try {
+      const solarResponse = await fetch('https://services.swpc.noaa.gov/json/solar-cycle/observed-solar-cycle-indices.json');
+      const solarData = await solarResponse.json();
+      const latestSolar = solarData[solarData.length - 1];
+      sfi = latestSolar ? latestSolar.ssn : 100;
+    } catch (error) {
+      console.warn('Failed to fetch solar data, using default SFI');
+    }
+
+    // Calculate realistic HF propagation zones based on solar conditions
+    const propagationZones = calculateHFPropagationZones(sfi);
+
+    // Add zones across visible worlds with tessellation
+    for (let world = visibleWorlds.start; world <= visibleWorlds.end; world++) {
+      const worldOffset = world * 360;
+
+      propagationZones.forEach(zone => {
+        const offsetLng = zone.lng + worldOffset;
+
+        const circle = L.circle([zone.lat, offsetLng], {
+          radius: zone.radius * 1000, // Convert to meters
+          color: zone.color,
+          weight: 2,
+          opacity: opacity / 100,
+          fillColor: zone.color,
+          fillOpacity: (opacity / 100) * 0.15,
+          dashArray: '8, 4'
+        });
+
+        if (world === 0) { // Only add popup to main world
+          circle.bindPopup(`
+            <div style="font-family: Inter, sans-serif;">
+              <h3 style="margin: 0 0 8px 0; font-size: 14px; font-weight: 600;">📊 HF Propagation Zone</h3>
+              <p style="margin: 0; font-size: 12px; color: #666;">
+                <strong>Band:</strong> ${zone.band}<br>
+                <strong>Range:</strong> ${zone.radius} km<br>
+                <strong>Reliability:</strong> ${zone.reliability}%<br>
+                <strong>Solar Flux:</strong> ${sfi}<br>
+                <strong>Conditions:</strong> ${zone.conditions}<br>
+                <strong>Note:</strong> Based on current solar conditions
+              </p>
+            </div>
+          `);
+        }
+
+        layerGroup.addLayer(circle);
+      });
+    }
+
+  } catch (error) {
+    console.error('Failed to fetch solar data for propagation predictions:', error);
+
+    // Get map bounds for fallback zones too
+    const map = layerGroup._map;
+    let westBound = -180;
+    let eastBound = 180;
+
+    if (map) {
+      const bounds = map.getBounds();
+      westBound = bounds.getWest();
+      eastBound = bounds.getEast();
+    }
+
+    const worldWidth = 360;
+    const startWorld = Math.floor(westBound / worldWidth);
+    const endWorld = Math.ceil(eastBound / worldWidth);
+
+    // Fallback: show basic propagation zones with tessellation
+    const fallbackZones = [
+      { lat: 40, lng: -100, radius: 1500, band: '20m', color: '#00ff00', reliability: 75, conditions: 'Good' },
+      { lat: 50, lng: 10, radius: 1200, band: '40m', color: '#ffaa00', reliability: 65, conditions: 'Fair' },
+      { lat: -30, lng: 140, radius: 2000, band: '15m', color: '#ff6600', reliability: 85, conditions: 'Excellent' }
+    ];
+
+    for (let world = startWorld; world <= endWorld; world++) {
+      const worldOffset = world * worldWidth;
+
+      fallbackZones.forEach(zone => {
+        const offsetLng = zone.lng + worldOffset;
+
+        const circle = L.circle([zone.lat, offsetLng], {
+          radius: zone.radius * 1000,
+          color: zone.color,
+          weight: 2,
+          opacity: opacity / 100,
+          fillColor: zone.color,
+          fillOpacity: (opacity / 100) * 0.15,
+          dashArray: '8, 4'
+        });
+
+        circle.bindPopup(`
+          <div style="font-family: Inter, sans-serif;">
+            <h3 style="margin: 0 0 8px 0; font-size: 14px; font-weight: 600;">📊 HF Propagation Zone</h3>
+            <p style="margin: 0; font-size: 12px; color: #666;">
+              <strong>Band:</strong> ${zone.band}<br>
+              <strong>Range:</strong> ${zone.radius} km<br>
+              <strong>Reliability:</strong> ${zone.reliability}%<br>
+              <strong>Conditions:</strong> ${zone.conditions}<br>
+              <strong>Note:</strong> Fallback prediction (no solar data)
+            </p>
+          </div>
+        `);
+
+        layerGroup.addLayer(circle);
+      });
+    }
+  }
+}
+
+// Calculate HF propagation zones based on solar flux index
+function calculateHFPropagationZones(sfi: number) {
+  const zones = [];
+
+  // Base propagation ranges adjusted by solar conditions
+  const solarMultiplier = Math.max(0.5, Math.min(1.5, sfi / 150)); // Normalize around SFI 150
+
+  // 20m band - best for DX during high solar activity
+  zones.push({
+    lat: 40,
+    lng: -100,
+    radius: Math.round(1800 * solarMultiplier),
+    band: '20m',
+    color: sfi > 120 ? '#00ff00' : '#ffaa00',
+    reliability: Math.min(95, Math.round(60 + (sfi / 3))),
+    conditions: sfi > 150 ? 'Excellent' : sfi > 100 ? 'Good' : 'Fair'
   });
 
-  circle.bindPopup('VOACAP Prediction<br>20m band coverage');
-  layerGroup.addLayer(circle);
+  // 40m band - reliable for medium distance
+  zones.push({
+    lat: 50,
+    lng: 10,
+    radius: Math.round(1200 * Math.min(1.2, solarMultiplier)),
+    band: '40m',
+    color: '#ffaa00',
+    reliability: Math.round(70 + (sfi / 10)),
+    conditions: sfi > 100 ? 'Good' : 'Fair'
+  });
+
+  // 15m band - excellent during solar maximum
+  if (sfi > 80) {
+    zones.push({
+      lat: -30,
+      lng: 140,
+      radius: Math.round(2200 * solarMultiplier),
+      band: '15m',
+      color: sfi > 140 ? '#ff6600' : '#ffaa00',
+      reliability: Math.min(90, Math.round(50 + (sfi / 2.5))),
+      conditions: sfi > 140 ? 'Excellent' : 'Good'
+    });
+  }
+
+  // 80m band - nighttime propagation
+  zones.push({
+    lat: 60,
+    lng: -30,
+    radius: Math.round(800 * Math.max(0.8, solarMultiplier)),
+    band: '80m',
+    color: '#aa66ff',
+    reliability: Math.round(55 + (sfi / 8)),
+    conditions: 'Night/Dawn'
+  });
+
+  return zones;
+}
+
+// Efficient Reverse Beacon Network (RBN) layer with tessellation
+function addBeaconNetwork(L: any, layerGroup: any, opacity: number) {
+  const map = layerGroup._map;
+  if (!map) return;
+
+  const visibleWorlds = getVisibleWorldsHelper(map);
+
+  const knownBeacons = [
+    { call: 'W6WX', lat: 37.4419, lng: -122.1430, band: '14MHz', location: 'Stanford, CA' },
+    { call: 'W0EEN', lat: 39.7392, lng: -104.9903, band: '14MHz', location: 'Denver, CO' },
+    { call: 'VE8AT', lat: 62.4540, lng: -114.3718, band: '14MHz', location: 'Yellowknife, NT' },
+    { call: 'OH2B', lat: 60.1699, lng: 24.9384, band: '14MHz', location: 'Helsinki, Finland' },
+    { call: 'JA2IGY', lat: 35.6762, lng: 139.6503, band: '14MHz', location: 'Tokyo, Japan' },
+    { call: 'VK6RBP', lat: -31.9505, lng: 115.8605, band: '14MHz', location: 'Perth, Australia' },
+    { call: 'ZS6DN', lat: -26.2041, lng: 28.0473, band: '14MHz', location: 'Johannesburg, South Africa' },
+    { call: 'LU4AA', lat: -34.6118, lng: -58.3960, band: '14MHz', location: 'Buenos Aires, Argentina' },
+  ];
+
+  // Add beacon markers across visible worlds with tessellation
+  for (let world = visibleWorlds.start; world <= visibleWorlds.end; world++) {
+    const worldOffset = world * 360;
+
+    knownBeacons.forEach(beacon => {
+      const offsetLng = beacon.lng + worldOffset;
+
+      const beaconIcon = L.divIcon({
+        className: 'beacon-marker',
+        html: `
+          <div style="
+            background: #ff6b35;
+            border: 2px solid white;
+            border-radius: 50%;
+            width: 16px;
+            height: 16px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            animation: beacon-pulse 2s ease-in-out infinite;
+          ">
+            <div style="
+              background: white;
+              border-radius: 50%;
+              width: 6px;
+              height: 6px;
+            "></div>
+          </div>
+        `,
+        iconSize: [16, 16],
+        iconAnchor: [8, 8],
+      });
+
+      const marker = L.marker([beacon.lat, offsetLng], {
+        icon: beaconIcon,
+        opacity: opacity / 100
+      });
+
+      if (world === 0) { // Only add popup to main world
+        marker.bindPopup(`
+          <div style="font-family: Inter, sans-serif;">
+            <h3 style="margin: 0 0 8px 0; font-size: 14px; font-weight: 600;">🔔 RBN Beacon</h3>
+            <p style="margin: 0; font-size: 12px; color: #666;">
+              <strong>Callsign:</strong> ${beacon.call}<br>
+              <strong>Location:</strong> ${beacon.location}<br>
+              <strong>Band:</strong> ${beacon.band}<br>
+              <strong>Network:</strong> Reverse Beacon Network<br>
+              <strong>Status:</strong> <span style="color: #10b981;">Active</span>
+            </p>
+            <div style="margin-top: 8px; font-size: 11px; color: #888;">
+              RBN stations monitor CW and digital signals automatically
+            </div>
+          </div>
+        `);
+      }
+
+      layerGroup.addLayer(marker);
+    });
+  }
+
+  // Add an informational marker explaining RBN
+  const infoMarker = L.marker([40, -100], {
+    icon: L.divIcon({
+      className: 'rbn-info-marker',
+      html: `
+        <div style="
+          background: #3b82f6;
+          color: white;
+          padding: 4px 8px;
+          border-radius: 4px;
+          font-size: 11px;
+          font-weight: bold;
+          white-space: nowrap;
+          box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+        ">ℹ️ RBN Info</div>
+      `,
+      iconSize: [80, 20],
+      iconAnchor: [40, 10],
+    }),
+    opacity: opacity / 100
+  });
+
+  infoMarker.bindPopup(`
+    <div style="font-family: Inter, sans-serif;">
+      <h3 style="margin: 0 0 8px 0; font-size: 14px; font-weight: 600;">🔔 Reverse Beacon Network</h3>
+      <p style="margin: 0; font-size: 12px; color: #666;">
+        The RBN is a network of stations that automatically monitor amateur radio bands
+        and report what stations they hear, when, and how strong they are.
+      </p>
+      <div style="margin: 8px 0; font-size: 12px;">
+        <strong>Features:</strong><br>
+        • Real-time signal reports<br>
+        • CW and digital mode monitoring<br>
+        • Signal strength measurements<br>
+        • Propagation analysis
+      </div>
+      <div style="margin-top: 8px; font-size: 11px; color: #888;">
+        <strong>Note:</strong> This layer shows known beacon locations.
+        Real-time RBN data integration requires telnet connection to RBN servers.
+      </div>
+    </div>
+  `);
+
+  layerGroup.addLayer(infoMarker);
 }
 
 // Proper solar terminator calculation

@@ -7,7 +7,7 @@ interface RecentSpotsPanelProps {
   selectedSpot?: PropagationSpot | null;
 }
 
-export default function RecentSpotsPanel({ spots, onSpotSelect, selectedSpot }: RecentSpotsPanelProps) {
+const RecentSpotsPanel = React.memo(function RecentSpotsPanel({ spots, onSpotSelect, selectedSpot }: RecentSpotsPanelProps) {
   // Sort by timestamp (newest first) and show only the most recent 50 spots
   const recentSpots = spots
     .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
@@ -149,4 +149,6 @@ export default function RecentSpotsPanel({ spots, onSpotSelect, selectedSpot }: 
       </div>
     </div>
   );
-}
+});
+
+export default RecentSpotsPanel;
