@@ -310,6 +310,32 @@ export default function HamViewApp() {
     saveMapLayers(mapLayers);
   }, [mapLayers]);
 
+  // Keyboard shortcuts for full-screen mode
+  useEffect(() => {
+    const handleKeyPress = (event: KeyboardEvent) => {
+      if (event.key === 'F11') {
+        event.preventDefault();
+        setIsMapFullScreen(prev => !prev);
+      } else if (event.key === 'Escape' && isMapFullScreen) {
+        setIsMapFullScreen(false);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyPress);
+    return () => window.removeEventListener('keydown', handleKeyPress);
+  }, [isMapFullScreen]);
+
+  // Trigger map resize when full-screen state changes
+  useEffect(() => {
+    // Small delay to ensure DOM has updated
+    const timer = setTimeout(() => {
+      // Trigger a window resize event to make the map recalculate its size
+      window.dispatchEvent(new Event('resize'));
+    }, 100);
+
+    return () => clearTimeout(timer);
+  }, [isMapFullScreen]);
+
   // Start auto-refresh when preferences change - only if callsign is set
   useEffect(() => {
     console.log('🔄 Auto-refresh useEffect triggered');
@@ -970,10 +996,17 @@ export default function HamViewApp() {
               <div className="map-controls">
                 <button
                   className="control-btn"
-                  title="Map Layers"
+                  title="Map Layers & Style"
                   onClick={() => setShowMapLayers(true)}
                 >
                   🗺️
+                </button>
+                <button
+                  className="control-btn"
+                  title={isMapFullScreen ? 'Exit Full Screen (Esc)' : 'Enter Full Screen (F11)'}
+                  onClick={() => setIsMapFullScreen(!isMapFullScreen)}
+                >
+                  {isMapFullScreen ? '⛶' : '⛶'}
                 </button>
               </div>
             </div>
@@ -990,7 +1023,7 @@ export default function HamViewApp() {
                 mapZoom={1} // TODO: Get actual map zoom level
                 qthLocation={qthLocation}
                 callsignDirection={state.filters.callsign.direction}
-                onFullScreenToggle={setIsMapFullScreen}
+                isFullScreen={isMapFullScreen}
               />
             </div>
           </div>

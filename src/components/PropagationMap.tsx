@@ -22,7 +22,7 @@ interface PropagationMapProps {
   mapZoom?: number; // For grid density
   qthLocation?: QTHLocation | null; // User's home station location
   callsignDirection?: 'received' | 'transmitted' | 'either'; // For spot icon differentiation
-  onFullScreenToggle?: (isFullScreen: boolean) => void; // Callback for full-screen state changes
+  isFullScreen?: boolean; // External full-screen state
 }
 
 // High-performance tessellation with viewport-based rendering
@@ -89,7 +89,7 @@ export default function PropagationMap({
   mapZoom = 1,
   qthLocation = null,
   callsignDirection = 'received',
-  onFullScreenToggle
+  isFullScreen = false
 }: PropagationMapProps) {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<any>(null);
@@ -109,7 +109,6 @@ export default function PropagationMap({
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showLegend, setShowLegend] = useState(false);
-  const [isFullScreen, setIsFullScreen] = useState(false);
   const [showEmptyState, setShowEmptyState] = useState(true);
   const highlightedArcsRef = useRef<any[]>([]);
   const lastBoundsRef = useRef<any>(null);
@@ -1005,22 +1004,7 @@ export default function PropagationMap({
     }, 3000);
   }, [selectedSpot]);
 
-  // Full-screen toggle functionality
-  const toggleFullScreen = useCallback(() => {
-    const newFullScreenState = !isFullScreen;
-    setIsFullScreen(newFullScreenState);
 
-    if (onFullScreenToggle) {
-      onFullScreenToggle(newFullScreenState);
-    }
-
-    // Trigger map resize after state change
-    setTimeout(() => {
-      if (mapInstanceRef.current) {
-        mapInstanceRef.current.invalidateSize();
-      }
-    }, 100);
-  }, [isFullScreen, onFullScreenToggle]);
 
   // Cleanup
   useEffect(() => {
@@ -1032,20 +1016,7 @@ export default function PropagationMap({
     };
   }, []);
 
-  // Keyboard shortcut for full-screen (F11, Escape)
-  useEffect(() => {
-    const handleKeyPress = (event: KeyboardEvent) => {
-      if (event.key === 'F11') {
-        event.preventDefault();
-        toggleFullScreen();
-      } else if (event.key === 'Escape' && isFullScreen) {
-        toggleFullScreen();
-      }
-    };
 
-    window.addEventListener('keydown', handleKeyPress);
-    return () => window.removeEventListener('keydown', handleKeyPress);
-  }, [isFullScreen, toggleFullScreen]);
 
   if (isLoading) {
     return (
@@ -1085,36 +1056,6 @@ export default function PropagationMap({
       }}
     >
       <div ref={mapRef} className="map-container" style={{ height: '100%', width: '100%' }} />
-
-      {/* Full-screen toggle button */}
-      <button
-        className="fullscreen-toggle-btn"
-        onClick={toggleFullScreen}
-        title={isFullScreen ? 'Exit Full Screen (Esc)' : 'Enter Full Screen (F11)'}
-        style={{
-          position: 'absolute',
-          top: '10px',
-          right: '10px',
-          zIndex: 1000,
-          background: 'rgba(0, 0, 0, 0.7)',
-          color: 'white',
-          border: 'none',
-          borderRadius: '4px',
-          padding: '8px 12px',
-          cursor: 'pointer',
-          fontSize: '16px',
-          fontWeight: 'bold',
-          transition: 'all 0.2s ease'
-        }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.background = 'rgba(0, 0, 0, 0.9)';
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.background = 'rgba(0, 0, 0, 0.7)';
-        }}
-      >
-        {isFullScreen ? '⛶' : '⛶'}
-      </button>
 
       {spots.length === 0 && showEmptyState && (
         <div className="map-empty-state">
