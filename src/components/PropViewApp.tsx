@@ -157,6 +157,7 @@ export default function HamViewApp() {
   const [mapSplitRatio, setMapSplitRatio] = useState(70);
   const [mapLayers, setMapLayers] = useState<MapLayer[]>(defaultMapLayers);
   const [qthLocation, setQTHLocation] = useState<QTHLocation | null>(null);
+  const [isMapFullScreen, setIsMapFullScreen] = useState(false);
 
   // Data update handler
   const handleDataUpdate = useCallback(async (data: {
@@ -989,29 +990,33 @@ export default function HamViewApp() {
                 mapZoom={1} // TODO: Get actual map zoom level
                 qthLocation={qthLocation}
                 callsignDirection={state.filters.callsign.direction}
+                onFullScreenToggle={setIsMapFullScreen}
               />
             </div>
           </div>
 
-          {/* Resize Handle */}
-          <div
-            className={`resize-handle ${isResizing ? 'resizing' : ''}`}
-            onMouseDown={handleResizeStart}
-          >
-            <div className="resize-indicator">
-              <div className="resize-dots">
-                <span></span>
-                <span></span>
-                <span></span>
+          {/* Resize Handle - Hidden in full-screen mode */}
+          {!isMapFullScreen && (
+            <div
+              className={`resize-handle ${isResizing ? 'resizing' : ''}`}
+              onMouseDown={handleResizeStart}
+            >
+              <div className="resize-indicator">
+                <div className="resize-dots">
+                  <span></span>
+                  <span></span>
+                  <span></span>
+                </div>
               </div>
             </div>
-          </div>
+          )}
 
-          {/* Tabbed Panels Section - Resizable */}
-          <div
-            className="tabbed-panels"
-            style={{ height: `${100 - mapSplitRatio}vh` }}
-          >
+          {/* Tabbed Panels Section - Hidden in full-screen mode */}
+          {!isMapFullScreen && (
+            <div
+              className="tabbed-panels"
+              style={{ height: `${100 - mapSplitRatio}vh` }}
+            >
             <div className="tab-bar">
               {getEnabledPanels().map(panel => (
                 <button
@@ -1029,6 +1034,7 @@ export default function HamViewApp() {
               {renderActiveTabContent()}
             </div>
           </div>
+        )}
         </div>
       </main>
 

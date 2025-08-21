@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useMemo } from 'react';
 import type { PropagationSpot } from '../types';
 
 interface RecentSpotsPanelProps {
@@ -8,10 +8,30 @@ interface RecentSpotsPanelProps {
 }
 
 const RecentSpotsPanel = React.memo(function RecentSpotsPanel({ spots, onSpotSelect, selectedSpot }: RecentSpotsPanelProps) {
-  // Sort by timestamp (newest first) and show only the most recent 50 spots
-  const recentSpots = spots
-    .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
-    .slice(0, 50);
+  const [searchTerm, setSearchTerm] = useState('');
+
+  // Filter and sort spots based on search term
+  const filteredAndSortedSpots = useMemo(() => {
+    let filtered = spots;
+
+    // Apply search filter
+    if (searchTerm.trim()) {
+      const search = searchTerm.toLowerCase().trim();
+      filtered = spots.filter(spot =>
+        spot.transmitter.callsign.toLowerCase().includes(search) ||
+        spot.receiver.callsign.toLowerCase().includes(search) ||
+        spot.band.toLowerCase().includes(search) ||
+        spot.mode.toLowerCase().includes(search) ||
+        spot.transmitter.location.country?.toLowerCase().includes(search) ||
+        spot.receiver.location.country?.toLowerCase().includes(search)
+      );
+    }
+
+    // Sort by timestamp (newest first) and limit to 100 spots
+    return filtered
+      .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
+      .slice(0, 100);
+  }, [spots, searchTerm]);
 
   const formatFrequency = (frequency: number): string => {
     if (frequency >= 1000000) {
@@ -64,13 +84,13 @@ const RecentSpotsPanel = React.memo(function RecentSpotsPanel({ spots, onSpotSel
     };
   };
 
-  if (recentSpots.length === 0) {
+  if (filteredAndSortedSpots.length === 0) {
     return (
       <div className="recent-spots-empty">
         <div className="empty-icon">📻</div>
-        <h3>No Recent Spots</h3>
-        <p>No propagation spots found.</p>
-        <small>Check your filters or wait for new data...</small>
+        <h3>{searchTerm ? 'No Matching Spots' : 'No Recent Spots'}</h3>
+        <p>{searchTerm ? `No spots found matching "${searchTerm}"` : 'No propagation spots found.'}</p>
+        <small>{searchTerm ? 'Try a different search term...' : 'Check your filters or wait for new data...'}</small>
       </div>
     );
   }
@@ -79,11 +99,37 @@ const RecentSpotsPanel = React.memo(function RecentSpotsPanel({ spots, onSpotSel
     <div className="recent-spots">
       <div className="spots-header">
         <h3>Recent Spots</h3>
-        <div className="spots-count">{recentSpots.length} of {spots.length}</div>
+        <div className="spots-count">
+          {filteredAndSortedSpots.length} of {spots.length}
+          {searchTerm && <span className="search-indicator"> (filtered)</span>}
+        </div>
+      </div>
+
+      {/* Search Bar */}
+      <div className="spots-search">
+        <div className="search-input-container">
+          <input
+            type="text"
+            placeholder="Search callsigns, bands, modes, countries..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="search-input"
+          />
+          <div className="search-icon">🔍</div>
+          {searchTerm && (
+            <button
+              className="clear-search"
+              onClick={() => setSearchTerm('')}
+              title="Clear search"
+            >
+              ✕
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="spots-list">
-        {recentSpots.map((spot) => {
+        {filteredAndSortedSpots.map((spot) => {
           const signalQuality = getSignalQuality(spot.snr);
           const direction = getDirectionInfo(spot);
           const isSelected = selectedSpot?.id === spot.id;
