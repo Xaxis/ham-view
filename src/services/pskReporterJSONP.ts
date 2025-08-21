@@ -81,16 +81,32 @@ export class PSKReporterJSONP {
           return;
         }
 
-        // Load ALL data for the callsign - filters only affect rendering, not data retrieval
+        // Load data based on direction filter - we need different API calls for different directions
         const params = new URLSearchParams({
-          rptlimit: '1000', // Get more data since filters are client-side only
+          rptlimit: '1000', // Get more data since other filters are client-side only
           callback: callbackName,
           flowStartSeconds: startTime.toString()
         });
 
-        // ALWAYS query for signals received BY this callsign (standard PSK Reporter usage)
-        // The transmitter/receiver filters will be applied client-side during rendering
-        params.set('receiverCallsign', queryCallsign.toUpperCase());
+        // Query based on direction filter to get the right data
+        switch (filters.callsign.direction) {
+          case 'transmitted':
+            // Show signals transmitted BY this callsign (who heard the callsign)
+            params.set('senderCallsign', queryCallsign.toUpperCase());
+            break;
+          case 'received':
+            // Show signals received BY this callsign (who the callsign heard) - DEFAULT
+            params.set('receiverCallsign', queryCallsign.toUpperCase());
+            break;
+          case 'either':
+            // For "either direction", we'll need to make two API calls and combine results
+            // For now, default to received (we'll enhance this later)
+            params.set('receiverCallsign', queryCallsign.toUpperCase());
+            break;
+          default:
+            // Fallback to received
+            params.set('receiverCallsign', queryCallsign.toUpperCase());
+        }
 
         const url = `https://retrieve.pskreporter.info/query?${params.toString()}`;
 
@@ -562,8 +578,7 @@ export class PSKReporterJSONP {
     // CRITICAL FIX: Clear stale data if callsign OR filter options changed
     if (this.currentFilters &&
         (this.currentFilters.callsign.search !== filters.callsign.search ||
-         this.currentFilters.callsign.transmitterOnly !== filters.callsign.transmitterOnly ||
-         this.currentFilters.callsign.receiverOnly !== filters.callsign.receiverOnly ||
+         this.currentFilters.callsign.direction !== filters.callsign.direction ||
          this.currentFilters.callsign.exactMatch !== filters.callsign.exactMatch)) {
       console.log('🗑️ Clearing cached data due to filter change');
       this.currentSpots = [];

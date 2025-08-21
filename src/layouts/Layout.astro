@@ -2188,6 +2188,7 @@ const { title } = Astro.props;
 	  text-align: left;
 	  cursor: pointer;
 	  transition: background var(--transition-fast);
+	  min-height: 48px;
 	}
 
 	.filter-section-header:hover {
@@ -2198,6 +2199,9 @@ const { title } = Astro.props;
 	  font-size: var(--text-lg);
 	  flex-shrink: 0;
 	  line-height: 1;
+	  display: flex;
+	  align-items: center;
+	  justify-content: center;
 	  display: flex;
 	  align-items: center;
 	  justify-content: center;
@@ -2212,9 +2216,10 @@ const { title } = Astro.props;
 	  color: var(--text-primary);
 	  text-transform: uppercase;
 	  letter-spacing: 0.05em;
-	  line-height: 1.2;
+	  line-height: 1;
 	  display: flex;
 	  align-items: center;
+	  margin: 0;
 	}
 
 	.section-toggle {
@@ -2335,9 +2340,181 @@ const { title } = Astro.props;
 	  display: flex;
 	  align-items: center;
 	  gap: var(--space-2);
-	  font-size: var(--text-xs);
-	  color: var(--text-secondary);
+	  font-size: var(--text-sm);
+	  color: var(--text-primary);
 	  cursor: pointer;
+	  margin-bottom: var(--space-2);
+	}
+
+	.checkbox-option input[type="checkbox"] {
+	  width: 16px;
+	  height: 16px;
+	  accent-color: var(--color-primary);
+	}
+
+	.checkbox-option span {
+	  font-weight: 500;
+	  color: var(--text-primary);
+	}
+
+	/* Callsign Direction Radio Buttons */
+	.direction-options {
+	  margin-bottom: var(--space-4);
+	}
+
+	.direction-label {
+	  display: block;
+	  font-weight: 600;
+	  color: var(--text-primary);
+	  margin-bottom: var(--space-3);
+	  font-size: var(--text-sm);
+	}
+
+	.radio-group {
+	  display: flex;
+	  flex-direction: column;
+	  gap: var(--space-3);
+	}
+
+	.radio-option {
+	  display: flex;
+	  flex-direction: column;
+	  gap: var(--space-1);
+	  cursor: pointer;
+	  padding: var(--space-3);
+	  border: 1px solid var(--border-color);
+	  border-radius: var(--radius-sm);
+	  background: var(--bg-secondary);
+	  transition: all var(--transition-fast);
+	  margin-bottom: var(--space-2);
+	}
+
+	.radio-option:hover {
+	  background: var(--bg-tertiary);
+	  border-color: var(--color-primary);
+	}
+
+	.radio-option input[type="radio"] {
+	  margin: 0;
+	  width: 16px;
+	  height: 16px;
+	  accent-color: var(--color-primary);
+	}
+
+	.radio-option > div:first-child {
+	  display: flex;
+	  align-items: center;
+	  gap: var(--space-2);
+	}
+
+	.radio-option span {
+	  font-weight: 500;
+	  color: var(--text-primary);
+	  font-size: var(--text-sm);
+	}
+
+	.radio-option input[type="radio"]:checked + span {
+	  color: var(--color-primary);
+	  font-weight: 600;
+	}
+
+	.option-description {
+	  font-size: var(--text-xs);
+	  color: var(--text-muted);
+	  margin-left: var(--space-5);
+	  font-style: italic;
+	}
+
+	.matching-options {
+	  border-top: 1px solid var(--border-color);
+	  padding-top: var(--space-4);
+	}
+
+
+
+	/* Solar Panel - Real-Time Graphs */
+	.solar-graphs {
+	  margin-top: var(--space-4);
+	}
+
+	.graph-section {
+	  margin-bottom: var(--space-4);
+	  background: var(--bg-secondary);
+	  border: 1px solid var(--border-color);
+	  border-radius: var(--radius-sm);
+	  padding: var(--space-4);
+	}
+
+	.graph-header {
+	  display: flex;
+	  justify-content: space-between;
+	  align-items: center;
+	  margin-bottom: var(--space-3);
+	  border-bottom: 1px solid var(--border-color);
+	  padding-bottom: var(--space-2);
+	}
+
+	.graph-header h5 {
+	  margin: 0;
+	  font-size: var(--text-base);
+	  font-weight: 600;
+	  color: var(--text-primary);
+	}
+
+	.graph-status {
+	  font-size: var(--text-xs);
+	  color: var(--text-muted);
+	  background: var(--bg-tertiary);
+	  padding: var(--space-1) var(--space-2);
+	  border-radius: var(--radius-xs);
+	}
+
+	.current-values {
+	  display: grid;
+	  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+	  gap: var(--space-3);
+	  margin-bottom: var(--space-3);
+	}
+
+	.value-item {
+	  display: flex;
+	  flex-direction: column;
+	  gap: var(--space-1);
+	}
+
+	.value-label {
+	  font-size: var(--text-xs);
+	  color: var(--text-muted);
+	  font-weight: 500;
+	}
+
+	.value-number {
+	  font-size: var(--text-sm);
+	  font-weight: 600;
+	  color: var(--text-primary);
+	}
+
+	.value-trend {
+	  font-size: var(--text-sm);
+	  font-weight: 500;
+	}
+
+	.data-source {
+	  font-size: var(--text-xs);
+	  color: var(--text-muted);
+	  font-style: italic;
+	  border-top: 1px solid var(--border-color);
+	  padding-top: var(--space-2);
+	}
+
+	.no-data {
+	  text-align: center;
+	  padding: var(--space-4);
+	  color: var(--text-muted);
+	}
+
+	.no-data p {
+	  margin: 0 0 var(--space-2) 0;
 	}
 
 	/* Time Presets */
@@ -3429,7 +3606,7 @@ const { title } = Astro.props;
 
 	.current-station-info h4 {
 	  margin: 0 0 var(--space-3) 0;
-	  color: var(--text-primary);
+	  color: var(--text-primary) !important;
 	  font-size: var(--text-base);
 	  font-weight: 600;
 	}
@@ -3454,13 +3631,15 @@ const { title } = Astro.props;
 
 	.detail-row .label {
 	  font-size: var(--text-sm);
-	  color: var(--text-muted);
+	  color: var(--text-muted) !important;
 	  font-weight: 500;
 	}
 
 	.detail-row .value {
 	  font-size: var(--text-sm);
-	  color: var(--text-primary);
+	  color: var(--text-primary) !important;
+	  font-weight: 600;
+	}
 	  font-weight: 600;
 	  font-family: var(--font-mono);
 	}
@@ -4570,6 +4749,8 @@ const { title } = Astro.props;
 	  display: flex;
 	  flex-direction: column;
 	  background: var(--bg-primary);
+	  padding: var(--space-4);
+	  overflow-y: auto;
 	}
 
 	.solar-data-empty {
@@ -4661,12 +4842,20 @@ const { title } = Astro.props;
 
 	.solar-indices {
 	  flex: 1;
+	  margin-bottom: var(--space-4);
 	}
 
 	.index-grid {
 	  display: grid;
-	  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-	  gap: var(--space-4);
+	  grid-template-columns: repeat(4, 1fr);
+	  gap: var(--space-3);
+	  margin-bottom: var(--space-4);
+	}
+
+	.solar-activity-grid {
+	  display: grid;
+	  grid-template-columns: repeat(2, 1fr);
+	  gap: var(--space-3);
 	  margin-bottom: var(--space-4);
 	}
 
@@ -4751,6 +4940,7 @@ const { title } = Astro.props;
 	  border: 1px solid var(--border-primary);
 	  border-radius: var(--radius-lg);
 	  padding: var(--space-4);
+	  margin-bottom: var(--space-4);
 	}
 
 	.solar-impact h4 {
@@ -5311,17 +5501,7 @@ const { title } = Astro.props;
 	  border-bottom: 1px solid var(--border-primary);
 	}
 
-	.section-title {
-	  display: flex;
-	  align-items: center;
-	  gap: var(--space-2);
-	  margin: 0 0 var(--space-3) 0;
-	  font-size: var(--text-sm);
-	  font-weight: 700;
-	  color: var(--text-primary);
-	  text-transform: uppercase;
-	  letter-spacing: 0.05em;
-	}
+
 
 	.map-style-grid {
 	  display: grid;

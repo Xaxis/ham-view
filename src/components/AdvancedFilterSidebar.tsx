@@ -14,6 +14,7 @@ const allModes: Mode[] = ['FT8', 'FT4', 'PSK31', 'PSK63', 'WSPR', 'JT65', 'CW', 
 
 const timePresets = [
   { value: 'last-hour', label: 'Last Hour', hours: 1 },
+  { value: 'last-2h', label: 'Last 2 Hours', hours: 2 },
   { value: 'last-6h', label: 'Last 6 Hours', hours: 6 },
   { value: 'last-24h', label: 'Last 24 Hours', hours: 24 },
   { value: 'custom', label: 'Custom Range', hours: 0 },
@@ -105,8 +106,7 @@ function AdvancedFilterSidebar({
       modes: [],
       callsign: {
         search: '',
-        transmitterOnly: false,
-        receiverOnly: false,
+        direction: 'received',
         exactMatch: false,
       },
       geographic: {
@@ -193,39 +193,86 @@ function AdvancedFilterSidebar({
           )}
 
           <div className="callsign-options">
-            <label className="checkbox-option">
-              <input
-                type="checkbox"
-                checked={filters.callsign.transmitterOnly}
-                onChange={(e) => onFiltersChange({
-                  ...filters,
-                  callsign: { ...filters.callsign, transmitterOnly: e.target.checked }
-                })}
-              />
-              <span>Transmitter only</span>
-            </label>
-            <label className="checkbox-option">
-              <input
-                type="checkbox"
-                checked={filters.callsign.receiverOnly}
-                onChange={(e) => onFiltersChange({
-                  ...filters,
-                  callsign: { ...filters.callsign, receiverOnly: e.target.checked }
-                })}
-              />
-              <span>Receiver only</span>
-            </label>
-            <label className="checkbox-option">
-              <input
-                type="checkbox"
-                checked={filters.callsign.exactMatch}
-                onChange={(e) => onFiltersChange({
-                  ...filters,
-                  callsign: { ...filters.callsign, exactMatch: e.target.checked }
-                })}
-              />
-              <span>Exact match</span>
-            </label>
+            <div className="direction-options">
+              <label className="direction-label">Signal Direction:</label>
+              <div className="radio-group">
+                <label className="radio-option">
+                  <div>
+                    <input
+                      type="radio"
+                      name="callsign-direction"
+                      value="received"
+                      checked={filters.callsign.direction === 'received'}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          onFiltersChange({
+                            ...filters,
+                            callsign: { ...filters.callsign, direction: 'received' }
+                          });
+                        }
+                      }}
+                    />
+                    <span>📻 Received by {filters.callsign.search || '[callsign]'}</span>
+                  </div>
+                  <div className="option-description">Shows who the callsign heard</div>
+                </label>
+                <label className="radio-option">
+                  <div>
+                    <input
+                      type="radio"
+                      name="callsign-direction"
+                      value="transmitted"
+                      checked={filters.callsign.direction === 'transmitted'}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          onFiltersChange({
+                            ...filters,
+                            callsign: { ...filters.callsign, direction: 'transmitted' }
+                          });
+                        }
+                      }}
+                    />
+                    <span>📡 Transmitted by {filters.callsign.search || '[callsign]'}</span>
+                  </div>
+                  <div className="option-description">Shows who heard the callsign</div>
+                </label>
+                <label className="radio-option">
+                  <div>
+                    <input
+                      type="radio"
+                      name="callsign-direction"
+                      value="either"
+                      checked={filters.callsign.direction === 'either'}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          onFiltersChange({
+                            ...filters,
+                            callsign: { ...filters.callsign, direction: 'either' }
+                          });
+                        }
+                      }}
+                    />
+                    <span>⚡ Either direction</span>
+                  </div>
+                  <div className="option-description">Shows both transmitted and received</div>
+                </label>
+              </div>
+            </div>
+
+            <div className="matching-options">
+              <label className="checkbox-option">
+                <input
+                  type="checkbox"
+                  checked={filters.callsign.exactMatch}
+                  onChange={(e) => onFiltersChange({
+                    ...filters,
+                    callsign: { ...filters.callsign, exactMatch: e.target.checked }
+                  })}
+                />
+                <span>🎯 Exact callsign match</span>
+              </label>
+              <div className="option-description">Require exact match (no partial matches)</div>
+            </div>
           </div>
 
           <div className="callsign-help">

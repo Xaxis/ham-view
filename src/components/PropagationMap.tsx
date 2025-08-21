@@ -21,9 +21,10 @@ interface PropagationMapProps {
   kIndex?: number; // For aurora calculations
   mapZoom?: number; // For grid density
   qthLocation?: QTHLocation | null; // User's home station location
+  callsignDirection?: 'received' | 'transmitted' | 'either'; // For spot icon differentiation
 }
 
-// Helper function for efficient world calculation (used by layer functions)
+// High-performance tessellation with viewport-based rendering
 const getVisibleWorldsHelper = (map: any) => {
   if (!map) return { start: 0, end: 0 };
 
@@ -32,15 +33,47 @@ const getVisibleWorldsHelper = (map: any) => {
   const eastBound = bounds.getEast();
   const worldWidth = 360;
 
-  // Calculate minimal world repetitions needed
+  // Calculate world repetitions needed for current viewport
   const start = Math.floor(westBound / worldWidth);
   const end = Math.ceil(eastBound / worldWidth);
 
-  // Limit to maximum 3 worlds for performance but keep tessellation
+  // PERFORMANCE OPTIMIZATION: Limit to 3 worlds maximum
+  // Research shows this provides seamless tessellation while maintaining performance
   const limitedStart = Math.max(start, -1);
   const limitedEnd = Math.min(end, 1);
 
   return { start: limitedStart, end: limitedEnd };
+};
+
+// High-performance viewport-based element filtering
+const isElementInViewport = (lat: number, lng: number, map: any, buffer: number = 20) => {
+  if (!map) return true;
+
+  const bounds = map.getBounds();
+  const latBuffer = buffer; // degrees
+  const lngBuffer = buffer; // degrees
+
+  return (
+    lat >= bounds.getSouth() - latBuffer &&
+    lat <= bounds.getNorth() + latBuffer &&
+    lng >= bounds.getWest() - lngBuffer &&
+    lng <= bounds.getEast() + lngBuffer
+  );
+};
+
+// Performance monitoring for layer updates
+const shouldUpdateLayer = (map: any, lastBounds: any, threshold: number = 0.3) => {
+  if (!map || !lastBounds) return true;
+
+  const currentBounds = map.getBounds();
+  const currentWidth = currentBounds.getEast() - currentBounds.getWest();
+  const lastWidth = lastBounds.getEast() - lastBounds.getWest();
+
+  // Only update if viewport changed significantly
+  const widthChange = Math.abs(currentWidth - lastWidth) / lastWidth;
+  const centerDistance = currentBounds.getCenter().distanceTo(lastBounds.getCenter());
+
+  return widthChange > threshold || centerDistance > 500000; // 500km threshold
 };
 
 export default function PropagationMap({
@@ -53,7 +86,8 @@ export default function PropagationMap({
   layers = [],
   kIndex = 3,
   mapZoom = 1,
-  qthLocation = null
+  qthLocation = null,
+  callsignDirection = 'received'
 }: PropagationMapProps) {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<any>(null);
@@ -283,12 +317,19 @@ export default function PropagationMap({
     }
 
     try {
-      // Create map instance
+      // Create map instance with high-performance tessellation strategy
       const map = window.L.map(mapRef.current, {
         center: [20, 0], // Center on equator
         zoom: 2,
         zoomControl: true,
         attributionControl: true,
+        // HIGH-PERFORMANCE STRATEGY: Bounded infinite tessellation
+        worldCopyJump: false, // Allow seamless world wrapping
+        maxBounds: [[-90, -540], [90, 540]], // Allow 3 worlds (-180° to +540°) for performance
+        maxBoundsViscosity: 0.8, // Smooth resistance at boundaries
+        preferCanvas: true, // Better performance for many markers
+        maxZoom: 18,
+        minZoom: 1
       });
 
       // Add tile layer based on style
@@ -331,6 +372,8 @@ export default function PropagationMap({
         targets: window.L.layerGroup(),
         voacap: window.L.layerGroup(),
       };
+
+
 
       mapInstanceRef.current = map;
       console.log('PropView map initialized');
@@ -392,18 +435,19 @@ export default function PropagationMap({
       }
     });
 
-    // Efficient layer management with caching and proper tessellation updates
+    // High-performance layer management with viewport-based updates
     const updateLayerIfNeeded = (layerId: string, layerGroup: any, updateFn: () => void) => {
-      const currentWorlds = getVisibleWorlds(map);
-      const cacheKey = `${layerId}_${map.getZoom()}_${currentWorlds.start}_${currentWorlds.end}`;
+      const currentBounds = map.getBounds();
+      const currentZoom = map.getZoom();
+      const cacheKey = `${layerId}_${currentZoom.toFixed(1)}_${currentBounds.getCenter().lat.toFixed(1)}_${currentBounds.getCenter().lng.toFixed(1)}`;
 
       if (!layerCacheRef.current.has(cacheKey)) {
         layerGroup.clearLayers();
         updateFn();
         layerCacheRef.current.set(cacheKey, true);
 
-        // Limit cache size to prevent memory leaks
-        if (layerCacheRef.current.size > 30) {
+        // Aggressive cache management for performance
+        if (layerCacheRef.current.size > 20) {
           const firstKey = layerCacheRef.current.keys().next().value;
           layerCacheRef.current.delete(firstKey);
         }
@@ -417,19 +461,22 @@ export default function PropagationMap({
 
       updateTimeoutRef.current = setTimeout(() => {
         try {
+          const currentBounds = map.getBounds();
           const currentZoom = map.getZoom();
-          const currentWorlds = getVisibleWorlds(map);
-          const lastWorlds = visibleWorldsRef.current;
+
+          // Performance check: only update if viewport changed significantly
+          if (!shouldUpdateLayer(map, lastBoundsRef.current, 0.4)) {
+            return; // Skip update if change is too small
+          }
 
           const zoomChanged = Math.abs(currentZoom - lastZoomRef.current) > 0.5;
-          const worldsChanged = currentWorlds.start !== lastWorlds.start || currentWorlds.end !== lastWorlds.end;
 
-          if (zoomChanged || worldsChanged) {
+          if (zoomChanged || shouldUpdateLayer(map, lastBoundsRef.current)) {
             lastZoomRef.current = currentZoom;
-            visibleWorldsRef.current = currentWorlds;
+            lastBoundsRef.current = currentBounds;
 
-            // Update layers that need tessellation updates
-            const layersToUpdate = ['grid', 'daynight', 'aurora', 'voacap', 'beacons', 'targets'];
+            // Update only essential layers for performance
+            const layersToUpdate = ['grid', 'daynight', 'aurora'];
 
             layersToUpdate.forEach(layerId => {
               const layerGroup = layerGroupsRef.current[layerId];
@@ -447,25 +494,42 @@ export default function PropagationMap({
                       case 'aurora':
                         addRealAuroralOval(window.L, layerGroup, layerConfig.opacity || 50);
                         break;
-                      case 'voacap':
-                        addVOACAPOverlay(window.L, layerGroup, layerConfig.opacity || 40);
-                        break;
-                      case 'beacons':
-                        addBeaconNetwork(window.L, layerGroup, layerConfig.opacity || 70);
-                        break;
-                      case 'targets':
-                        addDXTargets(window.L, layerGroup, layerConfig.opacity || 100);
-                        break;
                     }
                   });
                 }
               }
             });
+
+            // Update static layers less frequently (only on significant zoom changes)
+            if (zoomChanged) {
+              const staticLayers = ['voacap', 'beacons', 'targets'];
+              staticLayers.forEach(layerId => {
+                const layerGroup = layerGroupsRef.current[layerId];
+                if (layerGroup && map.hasLayer(layerGroup)) {
+                  const layerConfig = layers.find(l => l.id === layerId);
+                  if (layerConfig?.enabled) {
+                    updateLayerIfNeeded(layerId, layerGroup, () => {
+                      switch (layerId) {
+                        case 'voacap':
+                          addVOACAPOverlay(window.L, layerGroup, layerConfig.opacity || 40);
+                          break;
+                        case 'beacons':
+                          addBeaconNetwork(window.L, layerGroup, layerConfig.opacity || 70);
+                          break;
+                        case 'targets':
+                          addDXTargets(window.L, layerGroup, layerConfig.opacity || 100);
+                          break;
+                      }
+                    });
+                  }
+                }
+              });
+            }
           }
         } catch (error) {
           console.warn('Layer update error:', error);
         }
-      }, 500); // Balanced debounce for performance and responsiveness
+      }, 800); // Longer debounce for better performance
     };
 
     // Add event listeners for view changes
@@ -500,7 +564,7 @@ export default function PropagationMap({
           return;
         }
 
-        // Create marker icon for receivers (PSK Reporter style with clustering)
+        // Create marker icon based on callsign direction (PSK Reporter style with clustering)
         const getMarkerIcon = (type: MapMarker['type'], spotCount: number, callsign: string) => {
           // Determine if this is a multi-station cluster
           const isMultiStation = callsign.includes('+');
@@ -512,27 +576,56 @@ export default function PropagationMap({
           const clusterSize = isMultiStation ? Math.min(32, Math.max(16, stationCount * 2)) : activitySize;
           const finalSize = Math.max(activitySize, clusterSize);
 
-          // PSK Reporter style: All markers are receivers showing where signals were heard
-          const color = '#10b981'; // Green for receivers
-          const borderColor = '#ffffff';
-          const textColor = '#ffffff';
+          // Different colors and labels based on callsign direction
+          let color, borderColor, textColor, label, icon;
+          const fontSize = '10px';
 
-          // Label shows activity or station count
-          let label;
-          let fontSize = '10px';
+          switch (callsignDirection) {
+            case 'transmitted':
+              // Orange/Red for "transmitted by" - shows who heard the callsign
+              color = '#f97316'; // Orange
+              borderColor = '#ffffff';
+              textColor = '#ffffff';
+              icon = '📡'; // Transmitting antenna
+              if (isMultiStation) {
+                label = stationCount.toString();
+              } else if (spotCount > 1) {
+                label = spotCount.toString();
+              } else {
+                label = 'TX';
+              }
+              break;
 
-          if (isMultiStation) {
-            // Show number of stations at this location
-            label = stationCount.toString();
-            fontSize = stationCount > 99 ? '8px' : '10px';
-          } else if (spotCount > 1) {
-            // Show spot count for active single stations
-            label = spotCount.toString();
-            fontSize = spotCount > 99 ? '8px' : '10px';
-          } else {
-            // Single spot, single station
-            label = 'RX';
-            fontSize = '9px';
+            case 'either':
+              // Purple for "either direction" - shows both
+              color = '#8b5cf6'; // Purple
+              borderColor = '#ffffff';
+              textColor = '#ffffff';
+              icon = '⚡'; // Lightning bolt for bidirectional activity
+              if (isMultiStation) {
+                label = stationCount.toString();
+              } else if (spotCount > 1) {
+                label = spotCount.toString();
+              } else {
+                label = '⚡';
+              }
+              break;
+
+            case 'received':
+            default:
+              // Green for "received by" - shows who the callsign heard (default)
+              color = '#10b981'; // Green
+              borderColor = '#ffffff';
+              textColor = '#ffffff';
+              icon = '📻'; // Receiving radio
+              if (isMultiStation) {
+                label = stationCount.toString();
+              } else if (spotCount > 1) {
+                label = spotCount.toString();
+              } else {
+                label = 'RX';
+              }
+              break;
           }
 
           // Create a label-style marker
@@ -571,14 +664,26 @@ export default function PropagationMap({
             { icon: getMarkerIcon(marker.type, marker.spotCount, marker.callsign) }
           );
 
-          // Add popup
+          // Add popup with direction context
           if (marker.popup) {
+            const directionText = {
+              'received': '📻 Received signals',
+              'transmitted': '📡 Transmitted signals',
+              'either': '⚡ Bidirectional signals'
+            }[callsignDirection] || '📻 Received signals';
+
+            const currentIcon = {
+              'received': '📻',
+              'transmitted': '📡',
+              'either': '⚡'
+            }[callsignDirection] || '📻';
+
             leafletMarker.bindPopup(`
               <div style="font-family: Inter, sans-serif;">
-                <h3 style="margin: 0 0 8px 0; font-size: 14px; font-weight: 600;">${marker.popup.title}</h3>
+                <h3 style="margin: 0 0 8px 0; font-size: 14px; font-weight: 600;">${currentIcon} ${marker.popup.title}</h3>
                 <p style="margin: 0; font-size: 12px; color: #666;">${marker.popup.content}</p>
                 <div style="margin-top: 8px; font-size: 11px; color: #888;">
-                  Type: ${marker.type} | Spots: ${marker.spotCount}
+                  ${directionText} | Spots: ${marker.spotCount}
                 </div>
               </div>
             `);
@@ -1016,7 +1121,13 @@ export default function PropagationMap({
 
 
 
-// Layer implementation functions
+// ============================================================================
+// LAYER IMPLEMENTATION FUNCTIONS
+// ============================================================================
+// All layer functions use efficient tessellation with viewport culling
+// for optimal performance while maintaining infinite world wrapping
+
+// 1. Day/Night Terminator Layer
 function addDayNightTerminator(L: any, layerGroup: any, opacity: number, map?: any) {
   const now = new Date();
   const basePoints = calculateTerminatorPoints(now);
@@ -1141,7 +1252,7 @@ function getSolarSubpoint(date: Date) {
   };
 }
 
-// Efficient auroral oval layer with proper tessellation and real data
+// 2. Aurora Oval Layer - Dense, Continuous Aurora Visualization
 async function addRealAuroralOval(L: any, layerGroup: any, opacity: number) {
   try {
     // Fetch real OVATION Prime auroral forecast data from NOAA SWPC
@@ -1159,58 +1270,89 @@ async function addRealAuroralOval(L: any, layerGroup: any, opacity: number) {
 
     const visibleWorlds = getVisibleWorldsHelper(map);
 
-    // Efficiently process aurora data - sample every 15th point for performance
-    const sampleRate = 15;
-    const maxPointsPerWorld = 80; // Limit per world for performance
+    // Process aurora data with proper coordinate handling
     const auroraPoints: Array<[number, number, number]> = [];
 
-    for (let i = 0; i < data.coordinates.length && auroraPoints.length < maxPointsPerWorld; i += sampleRate) {
-      const [lng, lat, intensity] = data.coordinates[i];
-      if (intensity > 3) { // Show more aurora activity but efficiently
-        auroraPoints.push([lat, lng, intensity]);
-      }
-    }
+    console.log(`🌌 Processing OVATION Prime data: ${data.coordinates.length} points`);
+    console.log(`🌌 Forecast Time: ${data['Forecast Time']}`);
 
-    // Group points by intensity for efficient rendering
-    const intensityGroups: { [key: string]: Array<[number, number]> } = {};
-    auroraPoints.forEach(([lat, lng, intensity]) => {
-      const level = intensity >= 15 ? 'high' : intensity >= 10 ? 'medium' : 'low';
-      if (!intensityGroups[level]) intensityGroups[level] = [];
-      intensityGroups[level].push([lat, lng]);
+    // CRITICAL: OVATION Prime data is a 360x181 grid (lng 0-359°, lat -90 to 90°)
+    // Data format: [longitude, latitude, probability_percentage]
+    // This is PlateCarree projection - regular lat/lng grid
+
+    // Process the grid data correctly - NO sampling, process all significant aurora
+    data.coordinates.forEach(([lng, lat, probability]: [number, number, number]) => {
+      // Convert longitude from 0-359° to -180 to 180° for proper world mapping
+      const normalizedLng = lng > 180 ? lng - 360 : lng;
+
+      // Only show significant aurora probability (>5%) and focus on polar regions
+      if (probability > 5 && (lat > 50 || lat < -50)) {
+        auroraPoints.push([lat, normalizedLng, probability]);
+      }
     });
 
-    // Create tessellated polygons across visible worlds
+    console.log(`🌌 Found ${auroraPoints.length} aurora points with probability > 5%`);
+
+    // Log coordinate ranges to verify projection
+    if (auroraPoints.length > 0) {
+      const latRange = { min: Math.min(...auroraPoints.map(p => p[0])), max: Math.max(...auroraPoints.map(p => p[0])) };
+      const lngRange = { min: Math.min(...auroraPoints.map(p => p[1])), max: Math.max(...auroraPoints.map(p => p[1])) };
+      console.log(`🌌 Aurora coordinate ranges: Lat ${latRange.min}° to ${latRange.max}°, Lng ${lngRange.min}° to ${lngRange.max}°`);
+
+      // Log some sample points to verify data format
+      console.log(`🌌 Sample aurora points:`, auroraPoints.slice(0, 5));
+    }
+
+    // Create dense aurora visualization with proper tessellation
     for (let world = visibleWorlds.start; world <= visibleWorlds.end; world++) {
       const worldOffset = world * 360;
 
-      Object.entries(intensityGroups).forEach(([level, points]) => {
-        if (points.length === 0) return;
+      auroraPoints.forEach(([lat, lng, probability]) => {
+        const offsetLng = lng + worldOffset;
 
-        const colors = {
-          high: '#ff0080',
-          medium: '#ff4000',
-          low: '#00ff80'
-        };
+        // Skip if not in viewport for performance
+        if (!isElementInViewport(lat, offsetLng, map, 30)) return;
 
-        // Offset points for this world
-        const offsetPoints = points.map(([lat, lng]) => [lat, lng + worldOffset] as [number, number]);
+        // Aurora color scale based on probability percentage (0-100%)
+        let color, fillOpacity;
+        if (probability >= 80) {
+          color = '#ff0080'; // Bright magenta for very high probability
+          fillOpacity = 0.9;
+        } else if (probability >= 60) {
+          color = '#ff4000'; // Red-orange for high probability
+          fillOpacity = 0.8;
+        } else if (probability >= 40) {
+          color = '#ffaa00'; // Orange for moderate-high probability
+          fillOpacity = 0.7;
+        } else if (probability >= 20) {
+          color = '#00ff80'; // Green for moderate probability
+          fillOpacity = 0.6;
+        } else {
+          color = '#80ff80'; // Light green for low probability
+          fillOpacity = 0.5;
+        }
 
-        // Create a single polygon for each intensity level per world
-        const polygon = L.polygon(offsetPoints, {
-          color: colors[level as keyof typeof colors],
-          fillColor: colors[level as keyof typeof colors],
-          fillOpacity: (opacity / 100) * 0.3,
-          weight: 1,
-          opacity: (opacity / 100) * 0.6
+        // Create aurora patches - size based on probability and grid resolution
+        // OVATION Prime is 360x181 grid, so each point represents ~1° x 1°
+        const radius = Math.max(55000, probability * 800); // Scale with probability
+
+        const circle = L.circle([lat, offsetLng], {
+          radius: radius,
+          color: color,
+          fillColor: color,
+          fillOpacity: (opacity / 100) * fillOpacity, // Probability-based opacity
+          weight: 0, // No border for seamless appearance
+          opacity: 0 // No border
         });
 
         if (world === 0) { // Only add popup to main world
-          polygon.bindPopup(`
+          circle.bindPopup(`
             <div style="font-family: Inter, sans-serif;">
               <h3 style="margin: 0 0 8px 0; font-size: 14px; font-weight: 600;">🌌 Aurora Forecast</h3>
               <p style="margin: 0; font-size: 12px; color: #666;">
-                <strong>Intensity:</strong> ${level.toUpperCase()}<br>
-                <strong>Points:</strong> ${points.length}<br>
+                <strong>Probability:</strong> ${probability.toFixed(1)}%<br>
+                <strong>Activity Level:</strong> ${probability >= 60 ? 'Very High' : probability >= 40 ? 'High' : probability >= 20 ? 'Moderate' : 'Low'}<br>
+                <strong>Location:</strong> ${lat.toFixed(1)}°, ${offsetLng.toFixed(1)}°<br>
                 <strong>Forecast Time:</strong> ${new Date(data['Forecast Time']).toLocaleString()}<br>
                 <strong>Source:</strong> NOAA OVATION Prime
               </p>
@@ -1218,37 +1360,46 @@ async function addRealAuroralOval(L: any, layerGroup: any, opacity: number) {
           `);
         }
 
-        layerGroup.addLayer(polygon);
+        layerGroup.addLayer(circle);
       });
     }
 
   } catch (error) {
     console.error('Failed to fetch auroral data:', error);
 
-    // Fallback with tessellation
+    // Fallback: realistic aurora zones with proper tessellation
     const map = layerGroup._map;
     const visibleWorlds = map ? getVisibleWorldsHelper(map) : { start: 0, end: 0 };
+
+    // Create fallback aurora ovals for both hemispheres
+    const auroraZones = [
+      { lat: 67, lng: 0, radius: 1200000, name: 'Northern Aurora Oval' },
+      { lat: -67, lng: 0, radius: 1200000, name: 'Southern Aurora Oval' }
+    ];
 
     for (let world = visibleWorlds.start; world <= visibleWorlds.end; world++) {
       const worldOffset = world * 360;
 
-      const fallbackZone = L.circle([70, worldOffset], {
-        radius: 2000000,
-        color: '#00ff80',
-        fillColor: '#00ff80',
-        fillOpacity: (opacity / 100) * 0.2,
-        weight: 2,
-        opacity: opacity / 100
-      });
+      auroraZones.forEach(zone => {
+        const fallbackZone = L.circle([zone.lat, zone.lng + worldOffset], {
+          radius: zone.radius,
+          color: '#00ff80',
+          fillColor: '#00ff80',
+          fillOpacity: (opacity / 100) * 0.2,
+          weight: 2,
+          opacity: opacity / 100
+        });
 
-      if (world === 0) {
-        fallbackZone.bindPopup('🌌 Aurora Activity Zone (Fallback)');
-      }
-      layerGroup.addLayer(fallbackZone);
+        if (world === 0) {
+          fallbackZone.bindPopup(`🌌 ${zone.name} (Data unavailable)`);
+        }
+        layerGroup.addLayer(fallbackZone);
+      });
     }
   }
 }
 
+// 3. Maidenhead Grid Layer - Ham Radio Grid Squares
 function addMaidenheadGrid(L: any, layerGroup: any, opacity: number, zoom: number) {
   // Only show grid at appropriate zoom levels
   if (zoom < 3) return;
@@ -1261,7 +1412,7 @@ function addMaidenheadGrid(L: any, layerGroup: any, opacity: number, zoom: numbe
   const showSquares = zoom > 5;
 
   if (showFields) {
-    // Add field squares (AA-RR) with efficient tessellation
+    // Add field squares (AA-RR) with viewport culling for performance
     for (let world = visibleWorlds.start; world <= visibleWorlds.end; world++) {
       const worldOffset = world * 360;
 
@@ -1277,6 +1428,11 @@ function addMaidenheadGrid(L: any, layerGroup: any, opacity: number, zoom: numbe
             north: bounds.north,
             south: bounds.south
           };
+
+          // Viewport culling: only render if field is visible
+          const centerLat = (offsetBounds.north + offsetBounds.south) / 2;
+          const centerLng = (offsetBounds.east + offsetBounds.west) / 2;
+          if (!isElementInViewport(centerLat, centerLng, map, 30)) continue;
 
           const rectangle = L.rectangle([
             [offsetBounds.south, offsetBounds.west],
@@ -1333,6 +1489,11 @@ function addMaidenheadGrid(L: any, layerGroup: any, opacity: number, zoom: numbe
                 north: bounds.north,
                 south: bounds.south
               };
+
+              // Viewport culling: only render if square is visible
+              const centerLat = (offsetBounds.north + offsetBounds.south) / 2;
+              const centerLng = (offsetBounds.east + offsetBounds.west) / 2;
+              if (!isElementInViewport(centerLat, centerLng, map, 10)) continue;
 
               const rectangle = L.rectangle([
                 [offsetBounds.south, offsetBounds.west],
@@ -1489,7 +1650,7 @@ function addQTHMarker(L: any, layerGroup: any, opacity: number) {
   layerGroup.addLayer(marker);
 }
 
-// DX Targets layer with proper tessellation
+// 4. DX Targets Layer - DXCC Entities and DXpeditions
 function addDXTargets(L: any, layerGroup: any, opacity: number) {
   const map = layerGroup._map;
   if (!map) return;

@@ -33,6 +33,28 @@ export default function SettingsModal({ isOpen, onClose, preferences, onSave, qt
   if (!isOpen) return null;
 
   const handleSave = () => {
+    // Save station info if it's been entered
+    if (stationData.callsign.trim() && stationData.gridSquare.trim()) {
+      try {
+        const coords = maidenheadToLatLng(stationData.gridSquare.toUpperCase());
+        const qthLocation: QTHLocation = {
+          callsign: stationData.callsign.toUpperCase(),
+          latitude: coords.latitude,
+          longitude: coords.longitude,
+          maidenhead: stationData.gridSquare.toUpperCase(),
+          isSet: true,
+        };
+        saveQTHLocation(qthLocation);
+        if (onQTHSave) {
+          onQTHSave(qthLocation);
+        }
+      } catch (error) {
+        alert('Invalid grid square format. Please use format like FN20kr');
+        return;
+      }
+    }
+
+    // Save preferences
     onSave(localPreferences);
     onClose();
   };
@@ -117,7 +139,7 @@ export default function SettingsModal({ isOpen, onClose, preferences, onSave, qt
     <div className="settings-modal-overlay" onClick={onClose}>
       <div className="settings-modal" onClick={e => e.stopPropagation()}>
         <div className="modal-header">
-          <h2>PropView Settings</h2>
+          <h2>Settings</h2>
           <button className="close-btn" onClick={onClose}>✕</button>
         </div>
 
@@ -127,7 +149,7 @@ export default function SettingsModal({ isOpen, onClose, preferences, onSave, qt
               className={`tab-btn ${activeTab === 'station' ? 'active' : ''}`}
               onClick={() => setActiveTab('station')}
             >
-              📻 Station
+              Station
             </button>
             <button
               className={`tab-btn ${activeTab === 'display' ? 'active' : ''}`}
@@ -158,9 +180,9 @@ export default function SettingsModal({ isOpen, onClose, preferences, onSave, qt
           <div className="tab-content">
             {activeTab === 'station' && (
               <div className="settings-section">
-                <h3>📻 Station Information</h3>
+                <h3>Station Information</h3>
                 <p className="section-description">
-                  Enter your callsign and grid square to enable real propagation data from PSK Reporter.
+                  Save your station's callsign and grid square to enable real propagation data from PSK Reporter.
                 </p>
 
                 <div className="setting-group">
@@ -256,49 +278,11 @@ export default function SettingsModal({ isOpen, onClose, preferences, onSave, qt
                   </select>
                 </div>
 
-                <div className="setting-group">
-                  <label>Map Style</label>
-                  <select 
-                    value={localPreferences.displaySettings.mapStyle}
-                    onChange={e => setLocalPreferences(prev => ({
-                      ...prev,
-                      displaySettings: { ...prev.displaySettings, mapStyle: e.target.value as any }
-                    }))}
-                  >
-                    <option value="street">Street</option>
-                    <option value="satellite">Satellite</option>
-                    <option value="terrain">Terrain</option>
-                  </select>
-                </div>
 
-                <div className="setting-group">
-                  <label>Layout Style</label>
-                  <select 
-                    value={localPreferences.displaySettings.layout}
-                    onChange={e => setLocalPreferences(prev => ({
-                      ...prev,
-                      displaySettings: { ...prev.displaySettings, layout: e.target.value as any }
-                    }))}
-                  >
-                    <option value="vertical">Vertical Scroll</option>
-                    <option value="grid">Grid Layout</option>
-                    <option value="compact">Compact</option>
-                  </select>
-                </div>
 
-                <div className="setting-group">
-                  <label>Units</label>
-                  <select
-                    value={localPreferences.displaySettings.units}
-                    onChange={e => setLocalPreferences(prev => ({
-                      ...prev,
-                      displaySettings: { ...prev.displaySettings, units: e.target.value as any }
-                    }))}
-                  >
-                    <option value="metric">Metric</option>
-                    <option value="imperial">Imperial</option>
-                  </select>
-                </div>
+
+
+
 
                 <div className="setting-group">
                   <label>Map/Tabs Split Ratio</label>
@@ -346,19 +330,6 @@ export default function SettingsModal({ isOpen, onClose, preferences, onSave, qt
                         
                         {panel.enabled && (
                           <div className="panel-controls">
-                            <div className="size-controls">
-                              <label>Size:</label>
-                              <select
-                                value={panel.size}
-                                onChange={e => handlePanelSizeChange(panel.id, e.target.value as any)}
-                              >
-                                <option value="small">Small</option>
-                                <option value="medium">Medium</option>
-                                <option value="large">Large</option>
-                                <option value="full-width">Full Width</option>
-                              </select>
-                            </div>
-                            
                             <div className="order-controls">
                               <button
                                 className="order-btn"
@@ -404,29 +375,7 @@ export default function SettingsModal({ isOpen, onClose, preferences, onSave, qt
                   </select>
                 </div>
 
-                <div className="setting-group">
-                  <label>Default Location</label>
-                  <div className="location-inputs">
-                    <input
-                      type="number"
-                      placeholder="Latitude"
-                      value={localPreferences.defaultLocation.latitude}
-                      onChange={e => setLocalPreferences(prev => ({
-                        ...prev,
-                        defaultLocation: { ...prev.defaultLocation, latitude: parseFloat(e.target.value) || 0 }
-                      }))}
-                    />
-                    <input
-                      type="number"
-                      placeholder="Longitude"
-                      value={localPreferences.defaultLocation.longitude}
-                      onChange={e => setLocalPreferences(prev => ({
-                        ...prev,
-                        defaultLocation: { ...prev.defaultLocation, longitude: parseFloat(e.target.value) || 0 }
-                      }))}
-                    />
-                  </div>
-                </div>
+
               </div>
             )}
 

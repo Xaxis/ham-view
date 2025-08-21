@@ -139,10 +139,10 @@ export default function SolarDataPanel({ solarData }: SolarDataPanelProps) {
 
   return (
     <div className="solar-data">
-      <div className="solar-header">
+      <div className="panel-header">
         <h3>Solar & Geomagnetic</h3>
-        <div className="solar-status">
-          <div className="solar-timestamp">{formatTimestamp(solarData.timestamp)}</div>
+        <div className="panel-controls">
+          <div className="panel-timestamp">{formatTimestamp(solarData.timestamp)}</div>
           {solarData.kIndex >= 4 && (
             <div
               className="storm-alert"
@@ -152,11 +152,26 @@ export default function SolarDataPanel({ solarData }: SolarDataPanelProps) {
               <span className="storm-text">{getStormLevel(solarData.kIndex)}</span>
             </div>
           )}
+          <button
+            className="refresh-btn"
+            onClick={() => {
+              fetchRealTimeSolarData();
+            }}
+            disabled={realTimeData.isLoading}
+            title="Refresh All Solar Data"
+          >
+            {realTimeData.isLoading ? '🔄' : '↻'}
+          </button>
         </div>
       </div>
 
-      <div className="solar-content">
-        <div className="solar-indices">
+      {realTimeData.error && (
+        <div className="error-message">
+          ⚠️ {realTimeData.error}
+        </div>
+      )}
+
+      <div className="solar-indices">
         <div className="index-grid">
           <div className="index-item">
             <div className="index-header">
@@ -219,193 +234,46 @@ export default function SolarDataPanel({ solarData }: SolarDataPanelProps) {
             </div>
           </div>
         </div>
-
-
       </div>
 
-      <div className="solar-impact">
-        <h4>Propagation Impact</h4>
-        <div className="impact-grid">
-          <div className="impact-item">
-            <span className="impact-label">HF Conditions:</span>
-            <span className={`impact-value ${solarData.kIndex <= 3 ? 'good' : solarData.kIndex <= 5 ? 'fair' : 'poor'}`}>
-              {solarData.kIndex <= 3 ? 'Good' : solarData.kIndex <= 5 ? 'Fair' : 'Poor'}
-            </span>
+      <div className="solar-activity-grid">
+        <div className="index-item">
+          <div className="index-header">
+            <span className="index-name">☀️ X-Ray Flux</span>
+            <span className="index-unit">W/m²</span>
           </div>
-          <div className="impact-item">
-            <span className="impact-label">VHF/UHF:</span>
-            <span className={`impact-value ${solarData.kIndex <= 4 ? 'good' : solarData.kIndex <= 6 ? 'fair' : 'poor'}`}>
-              {solarData.kIndex <= 4 ? 'Normal' : solarData.kIndex <= 6 ? 'Enhanced' : 'Disturbed'}
-            </span>
+          <div className="index-value">
+            {realTimeData.xrayFlux.length > 0 ?
+              realTimeData.xrayFlux[realTimeData.xrayFlux.length - 1]?.flux.toExponential(1) :
+              'N/A'}
           </div>
-          <div className="impact-item">
-            <span className="impact-label">Aurora Activity:</span>
-            <span className={`impact-value ${solarData.kIndex >= 5 ? 'high' : solarData.kIndex >= 3 ? 'moderate' : 'low'}`}>
-              {solarData.kIndex >= 5 ? 'High' : solarData.kIndex >= 3 ? 'Moderate' : 'Low'}
-            </span>
+          <div className="index-description">
+            {realTimeData.xrayFlux.length > 1 ?
+              (realTimeData.xrayFlux[realTimeData.xrayFlux.length - 1]?.flux >
+               realTimeData.xrayFlux[realTimeData.xrayFlux.length - 2]?.flux ? 'Rising trend' : 'Falling trend')
+              : 'GOES satellite data'}
+          </div>
+        </div>
+
+        <div className="index-item">
+          <div className="index-header">
+            <span className="index-name">🌌 Planetary K-Index</span>
+            <span className="index-unit">0-9</span>
+          </div>
+          <div className="index-value" style={{
+            color: solarData.kIndex >= 5 ? '#ef4444' :
+                   solarData.kIndex >= 3 ? '#f59e0b' : '#10b981'
+          }}>
+            {solarData.kIndex || 0}
+          </div>
+          <div className="index-description">
+            {solarData.kIndex >= 5 ? 'Storm conditions' :
+             solarData.kIndex >= 3 ? 'Unsettled field' :
+             'Quiet geomagnetic field'}
           </div>
         </div>
       </div>
 
-      <div className="geomagnetic-status">
-        <div className="status-header">
-          <h4>🌍 Geomagnetic Conditions</h4>
-          <button
-            className="solar-refresh-btn"
-            onClick={fetchRealTimeSolarData}
-            disabled={realTimeData.isLoading}
-            title="Refresh Solar Data"
-          >
-            {realTimeData.isLoading ? '🔄' : '↻'}
-          </button>
-        </div>
-        <div className="status-content">
-          {solarData.geomagneticStorm === 'NONE' ? (
-            <div className="status-indicator status-good">
-              <span className="status-icon">✅</span>
-              <div className="status-text">
-                <div className="status-title">Stable Conditions</div>
-                <div className="status-description">Normal HF propagation expected</div>
-              </div>
-            </div>
-          ) : (
-            <div className="status-indicator status-warning">
-              <span className="status-icon">⚠️</span>
-              <div className="status-text">
-                <div className="status-title">Geomagnetic Disturbance</div>
-                <div className="status-description">HF propagation may be affected</div>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Real-Time Solar Activity Graphs */}
-        <div className="solar-section">
-          <div className="section-header">
-            <h4>📊 Real-Time Solar Activity</h4>
-            <div className="section-status">
-              {realTimeData.lastUpdate && (
-                <span className="last-update">
-                  Updated: {realTimeData.lastUpdate.toLocaleTimeString()}
-                </span>
-              )}
-            </div>
-          </div>
-
-          {realTimeData.error && (
-            <div className="error-message">
-              ⚠️ {realTimeData.error}
-            </div>
-          )}
-
-          {/* X-Ray Flux Graph */}
-          <div className="activity-graph">
-            <div className="graph-header">
-              <h5>🌞 GOES X-Ray Flux (6 Hour)</h5>
-              <div className={`graph-status ${realTimeData.isLoading ? 'loading' : 'live'}`}>
-                {realTimeData.isLoading ? 'Loading...' : 'Live Data'}
-              </div>
-            </div>
-            <div className="graph-content">
-              {realTimeData.xrayFlux.length > 0 ? (
-                <div className="data-summary">
-                  <div className="data-points">
-                    <span className="data-label">Latest Flux:</span>
-                    <span className="data-value">
-                      {realTimeData.xrayFlux[realTimeData.xrayFlux.length - 1]?.flux.toExponential(2)} W/m²
-                    </span>
-                  </div>
-                  <div className="data-points">
-                    <span className="data-label">Data Points:</span>
-                    <span className="data-value">{realTimeData.xrayFlux.length}</span>
-                  </div>
-                  <div className="data-source">Source: NOAA SWPC GOES Satellites</div>
-                </div>
-              ) : (
-                <div className="graph-placeholder">
-                  <div className="graph-info">
-                    <p>Real-time X-ray flux data from GOES satellites</p>
-                    <p>Monitoring solar flare activity and space weather</p>
-                    <div className="data-source">Source: NOAA SWPC</div>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Solar Wind Graph */}
-          <div className="activity-graph">
-            <div className="graph-header">
-              <h5>🌪️ Solar Wind Magnetometer</h5>
-              <div className={`graph-status ${realTimeData.isLoading ? 'loading' : 'live'}`}>
-                {realTimeData.isLoading ? 'Loading...' : 'Live Data'}
-              </div>
-            </div>
-            <div className="graph-content">
-              {realTimeData.solarWind.length > 0 ? (
-                <div className="data-summary">
-                  <div className="data-points">
-                    <span className="data-label">Latest Bz:</span>
-                    <span className="data-value">
-                      {realTimeData.solarWind[realTimeData.solarWind.length - 1]?.bz.toFixed(1)} nT
-                    </span>
-                  </div>
-                  <div className="data-points">
-                    <span className="data-label">Solar Wind Speed:</span>
-                    <span className="data-value">
-                      {realTimeData.solarWind[realTimeData.solarWind.length - 1]?.speed.toFixed(0)} km/s
-                    </span>
-                  </div>
-                  <div className="data-source">Source: ACE/DSCOVR Satellites</div>
-                </div>
-              ) : (
-                <div className="graph-placeholder">
-                  <div className="graph-info">
-                    <p>Real-time solar wind magnetic field data</p>
-                    <p>Bz component critical for geomagnetic activity</p>
-                    <div className="data-source">Source: ACE/DSCOVR Satellites</div>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Solar Activity Summary */}
-          <div className="activity-summary">
-            <div className="summary-item">
-              <div className="summary-label">Current Solar Flux</div>
-              <div className="summary-value">Real-time monitoring</div>
-            </div>
-            <div className="summary-item">
-              <div className="summary-label">Geomagnetic Field</div>
-              <div className="summary-value">Live magnetometer</div>
-            </div>
-            <div className="summary-item">
-              <div className="summary-label">Space Weather</div>
-              <div className="summary-value">Active monitoring</div>
-            </div>
-          </div>
-
-          {/* Data Integration Note */}
-          <div className="integration-note">
-            <h5>📊 Enhanced Solar Data Integration</h5>
-            <p>
-              This panel now integrates with real-time NOAA SWPC data sources including:
-            </p>
-            <ul>
-              <li><strong>GOES X-Ray Flux:</strong> Real-time solar flare monitoring</li>
-              <li><strong>Solar Wind Data:</strong> Live magnetometer readings from ACE/DSCOVR</li>
-              <li><strong>Geomagnetic Indices:</strong> K-index and planetary disturbance levels</li>
-              <li><strong>Aurora Forecasts:</strong> OVATION Prime auroral activity predictions</li>
-            </ul>
-            <p>
-              Future updates will include interactive graphs, historical data visualization,
-              and correlation analysis with HF propagation conditions.
-            </p>
-          </div>
-        </div>
-      </div>
     </div>
   );
 }

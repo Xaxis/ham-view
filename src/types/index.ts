@@ -124,9 +124,8 @@ export interface FilterSettings {
   // Callsign filters
   callsign: {
     search: string;
-    transmitterOnly: boolean;
-    receiverOnly: boolean;
-    exactMatch: boolean;
+    direction: 'received' | 'transmitted' | 'either'; // Mutually exclusive radio buttons
+    exactMatch: boolean; // Separate checkbox for exact matching
   };
 
   // Geographic filters

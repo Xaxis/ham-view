@@ -45,7 +45,7 @@ const defaultMapLayers: MapLayer[] = [
 
   // Reference Layers
   { id: 'grid', name: 'Maidenhead Grid', description: 'Grid square overlay', icon: '🗂️', enabled: false, category: 'reference', opacity: 30 },
-  { id: 'qth', name: 'My QTH', description: 'Your station location', icon: '🏠', enabled: true, category: 'reference', opacity: 100 },
+  { id: 'qth', name: 'My QTH', description: 'Your station location', icon: '🏠', enabled: false, category: 'reference', opacity: 100 },
   { id: 'targets', name: 'DX Targets', description: 'Custom markers for DX', icon: '🎯', enabled: false, category: 'reference', opacity: 100 },
 ];
 
@@ -74,34 +74,33 @@ const defaultPreferences: UserPreferences = {
   dataRefreshInterval: 300, // 5 minutes
 };
 
-// Default filter settings
+// Default filter settings - Optimized for new users to see meaningful global activity
 const defaultFilters: FilterSettings = {
-  bands: ['20m', '40m', '80m', '15m', '10m'],
-  modes: ['FT8', 'FT4', 'PSK31'],
-  sources: ['PSK_REPORTER', 'WSPR_NET'],
+  bands: ['20m', '40m', '15m', '10m'], // Most active HF bands showing propagation differences
+  modes: ['FT8', 'FT4', 'PSK31', 'CW', 'RTTY'], // Popular digital modes + CW for comprehensive view
+  sources: ['PSK_REPORTER'],
   timeRange: {
-    start: new Date(Date.now() - 24 * 60 * 60 * 1000), // Last 24 hours
+    start: new Date(Date.now() - 2 * 60 * 60 * 1000), // Last 2 hours - recent enough to be relevant
     end: new Date(),
-    preset: 'last-24h',
+    preset: 'last-2h',
   },
   callsign: {
-    search: '',
-    transmitterOnly: false,
-    receiverOnly: true, // DEFAULT: Show signals received by the callsign
+    search: '', // No callsign filter - show global activity for new users
+    direction: 'either', // Show all propagation directions for maximum activity
     exactMatch: false,
   },
   geographic: {
-    gridSquares: [],
-    countries: [],
-    continents: [],
+    gridSquares: [], // No geographic filtering - show global activity
+    countries: [], // No country filtering - worldwide coverage
+    continents: [], // No continent filtering - all regions
   },
   signal: {
-    qualityThreshold: 'any',
+    qualityThreshold: 'any', // Show all signal strengths for maximum activity
   },
   advanced: {
-    minSpotCount: 1,
-    uniqueOnly: false,
-    bidirectionalOnly: false,
+    minSpotCount: 1, // Show all spots, even single occurrences
+    uniqueOnly: false, // Show all spots, not just unique callsigns
+    bidirectionalOnly: false, // Show all propagation directions
   },
 };
 
@@ -110,8 +109,17 @@ const loadInitialData = () => {
   const savedFilters = loadFilterSettings();
   const savedPreferences = loadUserPreferences();
 
+  // Ensure filters always have some bands and modes selected
+  let filters = savedFilters || defaultFilters;
+  if (filters.bands.length === 0) {
+    filters = { ...filters, bands: defaultFilters.bands };
+  }
+  if (filters.modes.length === 0) {
+    filters = { ...filters, modes: defaultFilters.modes };
+  }
+
   return {
-    filters: savedFilters || defaultFilters,
+    filters,
     preferences: savedPreferences || defaultPreferences,
   };
 };
@@ -138,7 +146,7 @@ const initialState: AppState = {
   },
 };
 
-export default function PropViewApp() {
+export default function HamViewApp() {
   const [state, setState] = useState<AppState>(initialState);
   const [mapData, setMapData] = useState<{ markers: any[]; paths: any[] }>({ markers: [], paths: [] });
   const [showSettings, setShowSettings] = useState(false);
@@ -268,13 +276,14 @@ export default function PropViewApp() {
     saveFilterSettings(state.filters);
   }, [state.filters]);
 
-  // Update filters for next sync cycle (don't trigger immediate refresh)
+  // Update filters for next sync cycle when callsign search, direction, or time range changes
   useEffect(() => {
+    console.log('🔧 Filter update triggered - callsign search, direction, or time range changed');
     // Only clear cached data and update filters for next sync - don't refresh immediately
     if (pskReporterJSONP) {
       pskReporterJSONP.updateFilters(state.filters);
     }
-  }, [state.filters.callsign, state.filters.timeRange]);
+  }, [state.filters.callsign.search, state.filters.callsign.direction, state.filters.timeRange.start, state.filters.timeRange.end]);
 
   // Save map layers when they change
   useEffect(() => {
@@ -283,6 +292,7 @@ export default function PropViewApp() {
 
   // Start auto-refresh when preferences change - only if callsign is set
   useEffect(() => {
+    console.log('🔄 Auto-refresh useEffect triggered');
     if (!qthLocation || !qthLocation.isSet || !qthLocation.callsign) {
       console.log('⏸️ Auto-refresh paused - waiting for user callsign');
       return;
@@ -303,7 +313,7 @@ export default function PropViewApp() {
     return () => {
       clearInterval(interval);
     };
-  }, [state.preferences.dataRefreshInterval, state.filters, qthLocation?.isSet, qthLocation?.callsign]);
+  }, [state.preferences.dataRefreshInterval, qthLocation?.isSet, qthLocation?.callsign]);
 
   // Set active tab to first enabled panel when preferences change
   useEffect(() => {
@@ -381,9 +391,17 @@ export default function PropViewApp() {
           rxMatch = spot.receiver.callsign.toUpperCase().includes(searchTerm);
         }
 
-        if (state.filters.callsign.transmitterOnly) return txMatch;
-        if (state.filters.callsign.receiverOnly) return rxMatch;
-        return txMatch || rxMatch;
+        // Apply direction filter (mutually exclusive)
+        switch (state.filters.callsign.direction) {
+          case 'transmitted':
+            return txMatch; // Show signals transmitted BY the callsign
+          case 'received':
+            return rxMatch; // Show signals received BY the callsign (default)
+          case 'either':
+            return txMatch || rxMatch; // Show both directions
+          default:
+            return rxMatch; // Fallback to received
+        }
       });
     }
 
@@ -426,7 +444,7 @@ export default function PropViewApp() {
     }
 
     // Apply signal quality threshold filter
-    if (state.filters.signal.qualityThreshold !== 'all') {
+    if (state.filters.signal.qualityThreshold !== 'any') {
       filtered = filtered.filter(spot => {
         const snr = spot.snr || -999;
         switch (state.filters.signal.qualityThreshold) {
@@ -857,7 +875,7 @@ export default function PropViewApp() {
           <div className="header-left">
             <h1 className="app-title">
               <span className="title-icon">📡</span>
-              PropView
+              HamView
             </h1>
             <span className="app-subtitle">Advanced Propagation Tracking</span>
           </div>
@@ -951,6 +969,7 @@ export default function PropViewApp() {
                 kIndex={state.solarData?.kIndex || 3}
                 mapZoom={1} // TODO: Get actual map zoom level
                 qthLocation={qthLocation}
+                callsignDirection={state.filters.callsign.direction}
               />
             </div>
           </div>

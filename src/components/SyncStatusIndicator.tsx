@@ -105,7 +105,7 @@ export default function SyncStatusIndicator({ syncStatus, onManualSync }: SyncSt
           disabled={syncStatus.isSyncing}
           title="Manual sync"
         >
-          🔄
+          {syncStatus.isSyncing ? '🔄' : '↻'}
         </button>
       )}
     </div>
