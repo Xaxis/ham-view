@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import type { UserPreferences, PanelConfig } from '../types';
 import { loadQTHLocation, saveQTHLocation, type QTHLocation, maidenheadToLatLng } from '../services/localStorage';
 
@@ -29,6 +29,14 @@ export default function SettingsModal({ isOpen, onClose, preferences, onSave, qt
     callsign: qthLocation?.callsign || '',
     gridSquare: qthLocation?.maidenhead || '',
   });
+
+  // Update station data when qthLocation prop changes
+  useEffect(() => {
+    setStationData({
+      callsign: qthLocation?.callsign || '',
+      gridSquare: qthLocation?.maidenhead || '',
+    });
+  }, [qthLocation]);
 
   if (!isOpen) return null;
 
@@ -227,7 +235,7 @@ export default function SettingsModal({ isOpen, onClose, preferences, onSave, qt
 
                 <div className="station-actions">
                   <button
-                    className="primary-btn"
+                    className="btn btn-primary"
                     onClick={handleStationSave}
                     disabled={!stationData.callsign.trim() || !stationData.gridSquare.trim()}
                   >

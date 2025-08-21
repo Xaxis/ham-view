@@ -10,9 +10,19 @@ const { title } = Astro.props;
 <html lang="en">
 	<head>
 		<meta charset="UTF-8" />
-		<meta name="description" content="PropView - Advanced propagation tracking and analysis dashboard for ham radio operators using real-time data sources." />
+		<meta name="description" content="HamView - Advanced propagation tracking and analysis dashboard for ham radio operators using real-time data sources." />
 		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<meta name="keywords" content="ham radio, amateur radio, propagation, PSK Reporter, WSPR, HF, VHF, UHF, solar, geomagnetic, K-index, solar flux" />
+		<meta name="author" content="HamView" />
+		<meta property="og:title" content="HamView - Advanced Propagation Tracking" />
+		<meta property="og:description" content="Real-time propagation tracking and analysis dashboard for ham radio operators" />
+		<meta property="og:url" content="https://hamview.com" />
+		<meta property="og:type" content="website" />
+		<meta name="twitter:card" content="summary_large_image" />
+		<meta name="twitter:title" content="HamView - Advanced Propagation Tracking" />
+		<meta name="twitter:description" content="Real-time propagation tracking and analysis dashboard for ham radio operators" />
 		<link rel="icon" type="image/png" href="/favicon.png" />
+		<link rel="canonical" href="https://hamview.com" />
 		<meta name="generator" content={Astro.generator} />
 		<link rel="preconnect" href="https://fonts.googleapis.com">
 		<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -26,7 +36,7 @@ const { title } = Astro.props;
 </html>
 
 <style is:global>
-	/* PropView - Advanced Propagation Tracking Dashboard */
+	/* HamView - Advanced Propagation Tracking Dashboard */
 
 	:root {
 	  /* Typography */
@@ -5499,6 +5509,10 @@ const { title } = Astro.props;
 	.map-style-section {
 	  padding: var(--space-4);
 	  border-bottom: 1px solid var(--border-primary);
+	}
+
+	.map-style-section .section-title {
+	  margin: 0 0 var(--space-3) 0;
 	}
 
 

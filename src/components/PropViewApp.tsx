@@ -74,15 +74,15 @@ const defaultPreferences: UserPreferences = {
   dataRefreshInterval: 300, // 5 minutes
 };
 
-// Default filter settings - Optimized for new users to see meaningful global activity
-const defaultFilters: FilterSettings = {
+// Function to get default filter settings - Dynamic time range for new users
+const getDefaultFilters = (): FilterSettings => ({
   bands: ['20m', '40m', '15m', '10m'], // Most active HF bands showing propagation differences
   modes: ['FT8', 'FT4', 'PSK31', 'CW', 'RTTY'], // Popular digital modes + CW for comprehensive view
   sources: ['PSK_REPORTER'],
   timeRange: {
-    start: new Date(Date.now() - 2 * 60 * 60 * 1000), // Last 2 hours - recent enough to be relevant
+    start: new Date(Date.now() - 24 * 60 * 60 * 1000), // Last 24 hours - calculated fresh each time
     end: new Date(),
-    preset: 'last-2h',
+    preset: 'last-24h',
   },
   callsign: {
     search: '', // No callsign filter - show global activity for new users
@@ -102,12 +102,13 @@ const defaultFilters: FilterSettings = {
     uniqueOnly: false, // Show all spots, not just unique callsigns
     bidirectionalOnly: false, // Show all propagation directions
   },
-};
+});
 
 // Load saved data immediately to avoid default state issues
 const loadInitialData = () => {
   const savedFilters = loadFilterSettings();
   const savedPreferences = loadUserPreferences();
+  const defaultFilters = getDefaultFilters(); // Get fresh default filters with current time
 
   // Ensure filters always have some bands and modes selected
   let filters = savedFilters || defaultFilters;
@@ -258,6 +259,29 @@ export default function HamViewApp() {
         }
       }));
       console.log(`🔍 Auto-set callsign filter for existing user: ${savedQTH.callsign.toUpperCase()}`);
+    } else {
+      // For new users without QTH: initialize with fresh default filters and start sync
+      const freshFilters = getDefaultFilters();
+      pskReporterJSONP.initializeForNewUsers(freshFilters);
+      console.log('🌍 Initializing global sync for new user with fresh default filters');
+
+      // Update state with fresh filters for new users
+      setState(prev => ({
+        ...prev,
+        filters: freshFilters
+      }));
+
+      // Immediately load data for new users
+      setTimeout(() => {
+        handleRefresh();
+      }, 100); // Small delay to ensure service is initialized
+    }
+
+    // Load data for existing users
+    if (savedQTH && savedQTH.isSet && savedQTH.callsign) {
+      setTimeout(() => {
+        handleRefresh();
+      }, 100);
     }
   }, []);
 
@@ -265,11 +289,6 @@ export default function HamViewApp() {
   useEffect(() => {
     saveUserPreferences(state.preferences);
   }, [state.preferences]);
-
-  // Load data on app startup - CLEAN VERSION
-  useEffect(() => {
-    handleRefresh();
-  }, []); // Only run once on startup
 
   // Save filters when they change
   useEffect(() => {

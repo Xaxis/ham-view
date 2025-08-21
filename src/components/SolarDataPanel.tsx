@@ -153,7 +153,7 @@ export default function SolarDataPanel({ solarData }: SolarDataPanelProps) {
             </div>
           )}
           <button
-            className="refresh-btn"
+            className="solar-refresh-btn"
             onClick={() => {
               fetchRealTimeSolarData();
             }}

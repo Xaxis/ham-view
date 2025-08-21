@@ -20,6 +20,22 @@ export class PSKReporterJSONP {
     this.startSyncCycle();
   }
 
+  // Start data sync without requiring a user callsign (for new users)
+  startGlobalSync() {
+    // Load persisted global data
+    this.loadPersistedData('global');
+
+    // Start 5-minute sync cycle
+    this.startSyncCycle();
+  }
+
+  // Initialize with default filters for new users
+  initializeForNewUsers(defaultFilters: any) {
+    this.currentFilters = defaultFilters;
+    this.loadPersistedData('global');
+    this.startSyncCycle();
+  }
+
   // Subscribe to data updates
   subscribe(callback: (data: any) => void) {
     this.listeners.push(callback);
@@ -35,10 +51,7 @@ export class PSKReporterJSONP {
 
   // Fetch PSK Reporter data using JSONP (bypasses CORS!)
   async getPSKReporterData(filters: FilterSettings): Promise<PropagationSpot[]> {
-    if (!this.userCallsign) {
-      console.warn('No callsign set, returning empty data');
-      return [];
-    }
+    // Allow fetching data without user callsign for global activity view
 
     return new Promise((resolve, reject) => {
       try {
@@ -73,39 +86,43 @@ export class PSKReporterJSONP {
         // Build PSK Reporter JSONP URL - Use filter time range and callsign
         const startTime = Math.floor(filters.timeRange.start.getTime() / 1000);
 
-        // CRITICAL FIX: Query for the callsign in the filter, not the user's callsign
+        // Query for the callsign in the filter, or fetch global data if none specified
         const queryCallsign = filters.callsign.search.trim();
-
-        if (!queryCallsign) {
-          resolve([]);
-          return;
-        }
 
         // Load data based on direction filter - we need different API calls for different directions
         const params = new URLSearchParams({
-          rptlimit: '1000', // Get more data since other filters are client-side only
+          rptlimit: '5000', // Higher limit for global data to show meaningful activity
           callback: callbackName,
           flowStartSeconds: startTime.toString()
         });
 
-        // Query based on direction filter to get the right data
-        switch (filters.callsign.direction) {
-          case 'transmitted':
-            // Show signals transmitted BY this callsign (who heard the callsign)
-            params.set('senderCallsign', queryCallsign.toUpperCase());
-            break;
-          case 'received':
-            // Show signals received BY this callsign (who the callsign heard) - DEFAULT
-            params.set('receiverCallsign', queryCallsign.toUpperCase());
-            break;
-          case 'either':
-            // For "either direction", we'll need to make two API calls and combine results
-            // For now, default to received (we'll enhance this later)
-            params.set('receiverCallsign', queryCallsign.toUpperCase());
-            break;
-          default:
-            // Fallback to received
-            params.set('receiverCallsign', queryCallsign.toUpperCase());
+        // If no callsign specified, use a very active station to show global activity
+        if (!queryCallsign) {
+          // PSK Reporter API requires a callsign parameter. For new users, we'll use
+          // a very active station that's likely to have lots of recent activity
+          console.log('🌍 Fetching global activity via active station for new user demo');
+          // Use a very active station - W1AW is ARRL's station and very active
+          params.set('senderCallsign', 'W1AW');
+        } else {
+          // Query based on direction filter to get the right data
+          switch (filters.callsign.direction) {
+            case 'transmitted':
+              // Show signals transmitted BY this callsign (who heard the callsign)
+              params.set('senderCallsign', queryCallsign.toUpperCase());
+              break;
+            case 'received':
+              // Show signals received BY this callsign (who the callsign heard) - DEFAULT
+              params.set('receiverCallsign', queryCallsign.toUpperCase());
+              break;
+            case 'either':
+              // For "either direction", we'll need to make two API calls and combine results
+              // For now, default to received (we'll enhance this later)
+              params.set('receiverCallsign', queryCallsign.toUpperCase());
+              break;
+            default:
+              // Fallback to received
+              params.set('receiverCallsign', queryCallsign.toUpperCase());
+          }
         }
 
         const url = `https://retrieve.pskreporter.info/query?${params.toString()}`;
@@ -449,7 +466,7 @@ export class PSKReporterJSONP {
 
   // Save data to localStorage
   private persistData(callsign?: string) {
-    const targetCallsign = callsign || this.currentFilters?.callsign.search || this.userCallsign;
+    const targetCallsign = callsign || this.currentFilters?.callsign.search || this.userCallsign || 'global';
     if (!targetCallsign) return;
 
     try {
@@ -511,7 +528,7 @@ export class PSKReporterJSONP {
       if (newSpots.length > 0) {
         this.currentSpots = newSpots;
         this.lastSyncTime = new Date();
-        this.persistData(this.currentFilters.callsign.search.trim());
+        this.persistData(this.currentFilters.callsign.search.trim() || 'global');
         this.notifyWithCurrentData();
       } else {
         this.lastSyncTime = new Date();
@@ -598,14 +615,12 @@ export class PSKReporterJSONP {
       // Update filters (this will clear cache if needed)
       this.updateFilters(filters);
 
-      // CRITICAL FIX: Load persisted data for the filter callsign, not user callsign
+      // Load persisted data for the filter callsign, or global data if no callsign
       if (filterCallsign) {
         this.loadPersistedData(filterCallsign);
       } else {
-        // No callsign filter, clear data
-        this.currentSpots = [];
-        await this.notifyWithCurrentData();
-        return;
+        // No callsign filter - load global data for new users
+        this.loadPersistedData('global');
       }
 
       // Check if we need fresh data based on filter time range
@@ -620,7 +635,7 @@ export class PSKReporterJSONP {
       const spots = await this.getPSKReporterData(filters);
       this.currentSpots = spots;
       this.lastSyncTime = new Date();
-      this.persistData(filterCallsign);
+      this.persistData(filterCallsign || 'global');
       await this.notifyWithCurrentData();
 
     } catch (error) {

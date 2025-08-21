@@ -6,5 +6,18 @@ import react from '@astrojs/react';
 export default defineConfig({
   integrations: [react()],
   output: 'static',
-  site: 'https://hamview.com'
+  site: 'https://hamview.com',
+  base: '/',
+  build: {
+    assets: 'assets'
+  },
+  vite: {
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks: undefined
+        }
+      }
+    }
+  }
 });

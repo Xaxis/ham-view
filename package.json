@@ -1,9 +1,9 @@
 {
-  "name": "propview",
+  "name": "hamview",
   "type": "module",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Advanced propagation tracking and analysis dashboard for ham radio operators",
-  "homepage": "https://propview.app",
+  "homepage": "https://hamview.com",
   "scripts": {
     "dev": "astro dev",
     "build": "astro build",

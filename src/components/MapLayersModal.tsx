@@ -100,7 +100,7 @@ export default function MapLayersModal({
     <div className="map-layers-modal-overlay" onClick={onClose}>
       <div className="map-layers-modal" onClick={e => e.stopPropagation()}>
         <div className="modal-header">
-          <h3>Map Layers & Style</h3>
+          <h3>Map Settings</h3>
           <button className="close-btn" onClick={onClose}>✕</button>
         </div>
 
