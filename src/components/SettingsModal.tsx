@@ -67,42 +67,7 @@ export default function SettingsModal({ isOpen, onClose, preferences, onSave, qt
     onClose();
   };
 
-  const handleStationSave = () => {
-    if (!stationData.callsign.trim()) {
-      alert('Please enter your callsign');
-      return;
-    }
 
-    if (!stationData.gridSquare.trim()) {
-      alert('Please enter your grid square (e.g., FN20kr)');
-      return;
-    }
-
-    try {
-      // Convert grid square to coordinates
-      const coords = maidenheadToLatLng(stationData.gridSquare.toUpperCase());
-
-      const qthLocation: QTHLocation = {
-        callsign: stationData.callsign.toUpperCase(),
-        latitude: coords.latitude,
-        longitude: coords.longitude,
-        maidenhead: stationData.gridSquare.toUpperCase(),
-        isSet: true,
-      };
-
-      // Save to localStorage
-      saveQTHLocation(qthLocation);
-
-      // Notify parent component
-      if (onQTHSave) {
-        onQTHSave(qthLocation);
-      }
-
-      alert('Station information saved successfully!');
-    } catch (error) {
-      alert('Invalid grid square format. Please use format like FN20kr');
-    }
-  };
 
   const handlePanelToggle = (panelId: string) => {
     setLocalPreferences(prev => ({
@@ -233,15 +198,7 @@ export default function SettingsModal({ isOpen, onClose, preferences, onSave, qt
                   <small>Your 6-character Maidenhead grid square (e.g., FN20kr)</small>
                 </div>
 
-                <div className="station-actions">
-                  <button
-                    className="btn btn-primary"
-                    onClick={handleStationSave}
-                    disabled={!stationData.callsign.trim() || !stationData.gridSquare.trim()}
-                  >
-                    💾 Save Station Info
-                  </button>
-                </div>
+
 
                 {qthLocation?.isSet && (
                   <div className="current-station-info">

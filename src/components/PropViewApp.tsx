@@ -77,12 +77,12 @@ const defaultPreferences: UserPreferences = {
 // Function to get default filter settings - Dynamic time range for new users
 const getDefaultFilters = (): FilterSettings => ({
   bands: ['20m', '40m', '15m', '10m'], // Most active HF bands showing propagation differences
-  modes: ['FT8', 'FT4', 'PSK31', 'CW', 'RTTY'], // Popular digital modes + CW for comprehensive view
+  modes: ['FT8', 'FT4'], // Limited to most popular modes for demo
   sources: ['PSK_REPORTER'],
   timeRange: {
-    start: new Date(Date.now() - 24 * 60 * 60 * 1000), // Last 24 hours - calculated fresh each time
+    start: new Date(Date.now() - 6 * 60 * 60 * 1000), // Last 6 hours - reasonable for demo
     end: new Date(),
-    preset: 'last-24h',
+    preset: 'last-6h',
   },
   callsign: {
     search: '', // No callsign filter - show global activity for new users

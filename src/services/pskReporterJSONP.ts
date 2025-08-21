@@ -91,18 +91,19 @@ export class PSKReporterJSONP {
 
         // Load data based on direction filter - we need different API calls for different directions
         const params = new URLSearchParams({
-          rptlimit: '5000', // Higher limit for global data to show meaningful activity
+          rptlimit: queryCallsign ? '1000' : '200', // Much lower limit for demo data to avoid overwhelming map
           callback: callbackName,
           flowStartSeconds: startTime.toString()
         });
 
-        // If no callsign specified, use a very active station to show global activity
+        // If no callsign specified, use popular active stations for demo
         if (!queryCallsign) {
-          // PSK Reporter API requires a callsign parameter. For new users, we'll use
-          // a very active station that's likely to have lots of recent activity
-          console.log('🌍 Fetching global activity via active station for new user demo');
-          // Use a very active station - W1AW is ARRL's station and very active
-          params.set('senderCallsign', 'W1AW');
+          // Use popular beacon/contest stations that are very active
+          const popularStations = ['W1AW', 'VK0EK', 'JA1XGI', 'DL0IGI', 'VE1ZZ', 'K1JT'];
+          const randomStation = popularStations[Math.floor(Math.random() * popularStations.length)];
+          console.log(`🌍 Fetching demo activity via popular station: ${randomStation}`);
+          params.set('senderCallsign', randomStation); // Show who heard this popular station
+          params.set('rptlimit', '500'); // Reasonable limit for demo
         } else {
           // Query based on direction filter to get the right data
           switch (filters.callsign.direction) {

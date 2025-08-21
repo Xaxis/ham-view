@@ -564,7 +564,7 @@ export default function PropagationMap({
           return;
         }
 
-        // Create marker icon based on callsign direction (PSK Reporter style with clustering)
+        // Create marker icon based on band colors (like PSK Reporter)
         const getMarkerIcon = (type: MapMarker['type'], spotCount: number, callsign: string) => {
           // Determine if this is a multi-station cluster
           const isMultiStation = callsign.includes('+');
@@ -576,54 +576,85 @@ export default function PropagationMap({
           const clusterSize = isMultiStation ? Math.min(32, Math.max(16, stationCount * 2)) : activitySize;
           const finalSize = Math.max(activitySize, clusterSize);
 
-          // Different colors and labels based on callsign direction
-          let color, borderColor, textColor, label, icon;
+          // Get associated spots for this marker to determine band color
+          const associatedSpots = spots.filter(spot =>
+            spot.receiver.callsign === callsign.split('+')[0] ||
+            spot.transmitter.callsign === callsign.split('+')[0]
+          );
+
+          // Get the most common band from associated spots
+          const bandCounts = new Map();
+          associatedSpots.forEach(spot => {
+            bandCounts.set(spot.band, (bandCounts.get(spot.band) || 0) + 1);
+          });
+
+          let mostCommonBand = '20m'; // Default fallback
+          let maxCount = 0;
+          bandCounts.forEach((count, band) => {
+            if (count > maxCount) {
+              maxCount = count;
+              mostCommonBand = band;
+            }
+          });
+
+          // Get band color using the same function as propagation paths
+          const getBandColorForMarker = (band: string) => {
+            switch (band) {
+              case '160m': return '#8B4513'; // Brown
+              case '80m': return '#FF4500'; // Orange Red
+              case '60m': return '#FF6347'; // Tomato
+              case '40m': return '#FFD700'; // Gold
+              case '30m': return '#ADFF2F'; // Green Yellow
+              case '20m': return '#00FF00'; // Lime
+              case '17m': return '#00CED1'; // Dark Turquoise
+              case '15m': return '#0000FF'; // Blue
+              case '12m': return '#8A2BE2'; // Blue Violet
+              case '10m': return '#FF00FF'; // Magenta
+              case '6m': return '#FF1493'; // Deep Pink
+              default: return '#808080'; // Gray
+            }
+          };
+
+          // Use band color for marker
+          const color = getBandColorForMarker(mostCommonBand);
+          const borderColor = '#ffffff';
+          const textColor = '#ffffff';
           const fontSize = '10px';
 
+          // Label based on callsign direction and activity
+          let label, icon;
           switch (callsignDirection) {
             case 'transmitted':
-              // Orange/Red for "transmitted by" - shows who heard the callsign
-              color = '#f97316'; // Orange
-              borderColor = '#ffffff';
-              textColor = '#ffffff';
               icon = '📡'; // Transmitting antenna
               if (isMultiStation) {
                 label = stationCount.toString();
               } else if (spotCount > 1) {
                 label = spotCount.toString();
               } else {
-                label = 'TX';
+                label = mostCommonBand.replace('m', ''); // Show band (e.g., "20")
               }
               break;
 
             case 'either':
-              // Purple for "either direction" - shows both
-              color = '#8b5cf6'; // Purple
-              borderColor = '#ffffff';
-              textColor = '#ffffff';
               icon = '⚡'; // Lightning bolt for bidirectional activity
               if (isMultiStation) {
                 label = stationCount.toString();
               } else if (spotCount > 1) {
                 label = spotCount.toString();
               } else {
-                label = '⚡';
+                label = mostCommonBand.replace('m', ''); // Show band (e.g., "20")
               }
               break;
 
             case 'received':
             default:
-              // Green for "received by" - shows who the callsign heard (default)
-              color = '#10b981'; // Green
-              borderColor = '#ffffff';
-              textColor = '#ffffff';
               icon = '📻'; // Receiving radio
               if (isMultiStation) {
                 label = stationCount.toString();
               } else if (spotCount > 1) {
                 label = spotCount.toString();
               } else {
-                label = 'RX';
+                label = mostCommonBand.replace('m', ''); // Show band (e.g., "20")
               }
               break;
           }
